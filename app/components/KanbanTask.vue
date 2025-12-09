@@ -1,18 +1,18 @@
 <template>
-  <li 
+  <div 
     class="task"
+    :class="{ 'dragging': isDragging }"
     :data-task-id="task.id"
     draggable="true"
     @dragstart="$emit('dragstart', $event)"
     @dragend="$emit('dragend', $event)"
-    @dragenter="$emit('dragenter', $event)"
     @dragover="$emit('dragover', $event)"
   >
     <div class="task-content">
       <span class="task-title">{{ task.title }}</span>
       <span class="task-meta">Priority: {{ task.priority }}</span>
     </div>
-  </li>
+  </div>
 </template>
 
 <script setup>
@@ -20,10 +20,14 @@ defineProps({
   task: {
     type: Object,
     required: true
+  },
+  isDragging: {
+    type: Boolean,
+    default: false
   }
-});
+})
 
-defineEmits(['dragstart', 'dragend', 'dragenter', 'dragover']);
+defineEmits(['dragstart', 'dragend', 'dragover'])
 </script>
 
 <style scoped>
@@ -35,7 +39,7 @@ defineEmits(['dragstart', 'dragend', 'dragenter', 'dragover']);
   cursor: grab;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
   user-select: none;
-  will-change: transform;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
 }
 
@@ -43,9 +47,16 @@ defineEmits(['dragstart', 'dragend', 'dragenter', 'dragover']);
   border-color: #6366f1;
   box-shadow: 0 4px 8px rgba(99, 102, 241, 0.3);
   background: linear-gradient(135deg, #3b4d65 0%, #242e3f 100%);
+  transform: translateY(-2px);
 }
 
 .task:active {
+  cursor: grabbing;
+}
+
+.task.dragging {
+  opacity: 0.3;
+  transform: scale(0.95);
   cursor: grabbing;
 }
 
