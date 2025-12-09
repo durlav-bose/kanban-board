@@ -10,7 +10,7 @@
       <span class="task-count">{{ column.tasks.length }}</span>
     </div>
     
-    <!-- Virtual Scroller for Tasks - NOW USES visibleTasks to remove gap! -->
+    <!-- Virtual Scroller - MUST USE visibleTasks! -->
     <DynamicScroller
       ref="scroller"
       :items="visibleTasks"
@@ -32,7 +32,7 @@
           <!-- Placeholder before task -->
           <transition name="placeholder-fade">
             <div 
-              v-if="dragDrop.shouldShowPlaceholderBefore(column.id, getOriginalIndex(item.id), item.id)"
+              v-if="dragDrop.shouldShowPlaceholderBefore(column.id, getOriginalIndex(item.id))"
               class="task-placeholder"
               :style="{ height: `${dragDrop.placeholderHeight.value}px` }"
             >
@@ -40,17 +40,17 @@
             </div>
           </transition>
 
-          <!-- Task Card -->
+          <!-- Task Card Wrapper - dragover on wrapper for better hit detection -->
           <div 
             class="task-wrapper"
             :data-task-index="getOriginalIndex(item.id)"
             :data-task-id="item.id"
+            @dragover.prevent="handleTaskDragOver($event, getOriginalIndex(item.id))"
           >
             <KanbanTask
               :task="item"
               @dragstart="handleTaskDragStart($event, item, index)"
               @dragend="handleTaskDragEnd"
-              @dragover.prevent="handleTaskDragOver($event, getOriginalIndex(item.id))"
             />
           </div>
 
@@ -115,19 +115,15 @@ const props = defineProps({
 
 const emit = defineEmits(['task-move'])
 
-// Get drag drop composable from parent
 const dragDrop = inject('kanbanDragDrop')
-
-// Refs
 const scroller = ref(null)
 
-// ✅ CRITICAL FIX: Filter out dragged task to remove the gap!
+// ✅ CRITICAL: Filter out dragged task
 const visibleTasks = computed(() => {
   if (!dragDrop.isDragging.value) {
     return props.column.tasks
   }
   
-  // If this is the source column, filter out the dragged task completely
   if (dragDrop.sourceColumnId.value === props.column.id && dragDrop.draggedTask.value) {
     return props.column.tasks.filter(task => task.id !== dragDrop.draggedTask.value.id)
   }
@@ -135,58 +131,50 @@ const visibleTasks = computed(() => {
   return props.column.tasks
 })
 
-// Get original index from the full tasks array (needed for drag logic)
+// ✅ CRITICAL: Get original index from full array
 const getOriginalIndex = (taskId) => {
   return props.column.tasks.findIndex(t => t.id === taskId)
 }
 
-// Handle task drag start
 const handleTaskDragStart = (event, task, visibleIndex) => {
   const element = event.target.closest('.task')
   if (!element) return
   
-  // Use original index from full array, not visible index!
   const originalIndex = getOriginalIndex(task.id)
   dragDrop.handleDragStart(event, task, props.column.id, originalIndex, element)
 }
 
-// Handle task drag end
 const handleTaskDragEnd = (event) => {
   const element = event.target.closest('.task')
   dragDrop.handleDragEnd(element)
 }
 
-// Handle drag over task
+// ✅ CRITICAL: This receives ORIGINAL index, not visible index
 const handleTaskDragOver = (event, originalIndex) => {
   dragDrop.handleDragOver(event, props.column.id, originalIndex)
 }
 
-// Handle drag over column (empty areas)
 const handleColumnDragOver = (event) => {
   event.preventDefault()
   dragDrop.handleColumnDragOver(event, props.column.id, props.column.tasks.length)
 }
 
-// Handle drag over empty column
 const handleEmptyDragOver = (event) => {
   dragDrop.handleEmptyColumnDragOver(event, props.column.id)
 }
 
-// Handle drop
 const handleColumnDrop = (event) => {
   dragDrop.handleDrop(event, props.column.id, (moveData) => {
     emit('task-move', moveData)
   })
 }
 
-// Force update the scroller
 const forceUpdate = () => {
   if (scroller.value) {
     scroller.value.forceUpdate()
   }
 }
 
-// Expose methods
 defineExpose({
   forceUpdate,
   scroller
@@ -233,7 +221,6 @@ defineExpose({
   box-shadow: 0 2px 4px rgba(99, 102, 241, 0.3);
 }
 
-/* Virtual Scroller */
 .tasks-scroller {
   flex: 1;
   overflow-y: auto;
@@ -242,7 +229,6 @@ defineExpose({
   position: relative;
 }
 
-/* Custom Scrollbar */
 .tasks-scroller::-webkit-scrollbar {
   width: 6px;
 }
@@ -261,13 +247,11 @@ defineExpose({
   background: #64748b;
 }
 
-/* Task wrapper */
 .task-wrapper {
   padding: 6px;
   transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Placeholder */
 .task-placeholder {
   margin: 6px;
   border: 2px dashed rgba(99, 102, 241, 0.6);
@@ -298,7 +282,6 @@ defineExpose({
   }
 }
 
-/* Placeholder transition */
 .placeholder-fade-enter-active,
 .placeholder-fade-leave-active {
   transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
@@ -310,7 +293,6 @@ defineExpose({
   transform: scaleY(0.5);
 }
 
-/* Empty drop zone */
 .empty-drop-zone {
   min-height: 200px;
   padding: 20px;
@@ -334,7 +316,6 @@ defineExpose({
   opacity: 0.5;
 }
 
-/* Virtual Scroller Overrides */
 :deep(.vue-recycle-scroller__item-wrapper) {
   width: 100%;
 }
