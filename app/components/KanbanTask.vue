@@ -1,18 +1,28 @@
 <template>
-  <li 
+  <div 
     class="task"
+    :class="{ 'is-dragging': isDragging }"
     :data-task-id="task.id"
     draggable="true"
     @dragstart="$emit('dragstart', $event)"
     @dragend="$emit('dragend', $event)"
-    @dragenter="$emit('dragenter', $event)"
     @dragover="$emit('dragover', $event)"
   >
     <div class="task-content">
-      <span class="task-title">{{ task.title }}</span>
-      <span class="task-meta">Priority: {{ task.priority }}</span>
+      <div class="task-header">
+        <span class="task-title">{{ task.title }}</span>
+        <span 
+          class="task-priority" 
+          :class="`priority-${task.priority.toLowerCase()}`"
+        >
+          {{ task.priority }}
+        </span>
+      </div>
+      <p v-if="task.description" class="task-description">
+        {{ task.description }}
+      </p>
     </div>
-  </li>
+  </div>
 </template>
 
 <script setup>
@@ -20,51 +30,96 @@ defineProps({
   task: {
     type: Object,
     required: true
+  },
+  isDragging: {
+    type: Boolean,
+    default: false
   }
-});
+})
 
-defineEmits(['dragstart', 'dragend', 'dragenter', 'dragover']);
+defineEmits(['dragstart', 'dragend', 'dragover'])
 </script>
 
 <style scoped>
 .task {
   background: linear-gradient(135deg, #334155 0%, #1e293b 100%);
   border: 2px solid #475569;
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 16px;
   cursor: grab;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
   user-select: none;
-  will-change: transform;
   position: relative;
 }
 
 .task:hover {
   border-color: #6366f1;
-  box-shadow: 0 4px 8px rgba(99, 102, 241, 0.3);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
   background: linear-gradient(135deg, #3b4d65 0%, #242e3f 100%);
+  transform: translateY(-2px);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .task:active {
   cursor: grabbing;
 }
 
+.task.is-dragging {
+  cursor: grabbing;
+}
+
 .task-content {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
   pointer-events: none;
 }
 
+.task-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
 .task-title {
-  font-weight: 500;
+  font-weight: 600;
   color: #f1f5f9;
   font-size: 0.95rem;
   line-height: 1.4;
+  flex: 1;
 }
 
-.task-meta {
-  font-size: 0.8rem;
+.task-priority {
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.priority-high {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.priority-medium {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fcd34d;
+  border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+.priority-low {
+  background: rgba(34, 197, 94, 0.2);
+  color: #86efac;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.task-description {
+  font-size: 0.85rem;
   color: #94a3b8;
+  line-height: 1.4;
+  margin: 0;
 }
 </style>
