@@ -72,6 +72,7 @@ export const useKanbanDragDrop = () => {
     if (!isDragging.value) return
     
     event.preventDefault()
+    event.stopPropagation() // ✅ CRITICAL: Stop event from bubbling to column handler
     event.dataTransfer.dropEffect = 'move'
     
     dropTargetColumnId.value = columnId
@@ -111,10 +112,14 @@ export const useKanbanDragDrop = () => {
     event.dataTransfer.dropEffect = 'move'
     
     dropTargetColumnId.value = columnId
-    // ✅ FIX: Don't always set to taskCount - only if currently null
-    // This prevents overriding the specific dropTargetIndex from handleDragOver
-    if (dropTargetIndex.value === null) {
+    
+    // ✅ CRITICAL: Only set to end if we don't have a specific target yet
+    // This prevents overriding the dropTargetIndex set by handleDragOver
+    if (dropTargetIndex.value === null || dropTargetIndex.value === undefined) {
       dropTargetIndex.value = taskCount
+      console.log(`[COL-DRAGOVER] Set to end: dropIdx=${taskCount}`)
+    } else {
+      console.log(`[COL-DRAGOVER] Keeping existing dropIdx=${dropTargetIndex.value}`)
     }
   }
 

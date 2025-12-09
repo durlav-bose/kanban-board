@@ -108,16 +108,6 @@ const handleTaskMove = ({ task, sourceColumnId, sourceColumnIndex, targetColumnI
   
   console.log('Task moved successfully to index:', clampedIndex)
   
-  // Force update the virtual scrollers
-  setTimeout(() => {
-    if (columnRefs.value[sourceColumnId]) {
-      columnRefs.value[sourceColumnId].forceUpdate()
-    }
-    if (columnRefs.value[targetColumnId] && sourceColumnId !== targetColumnId) {
-      columnRefs.value[targetColumnId].forceUpdate()
-    }
-  }, 0)
-  
   // Here you would typically sync with your backend
   // await api.moveTask(task.id, targetColumnId, clampedIndex)
 }

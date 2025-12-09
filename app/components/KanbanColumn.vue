@@ -151,6 +151,7 @@ const handleTaskDragEnd = (event) => {
 
 // ✅ CRITICAL: This receives ORIGINAL index, not visible index
 const handleTaskDragOver = (event, originalIndex) => {
+  event.stopPropagation() // Prevent column handler from firing
   dragDrop.handleDragOver(event, props.column.id, originalIndex)
 }
 
