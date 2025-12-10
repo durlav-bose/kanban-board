@@ -36,7 +36,7 @@ const setColumnRef = (columnId, el) => {
   }
 }
 
-// Sample data - replace with your actual data
+// Sample data
 const columns = ref([
   {
     id: 'todo',
@@ -80,34 +80,31 @@ const columns = ref([
   }
 ])
 
-// ✅ FIXED: Handle task movement with minimal reactivity to prevent blinking
+// Handle task movement
 const handleTaskMove = ({ task, sourceColumnId, sourceColumnIndex, targetColumnId, targetIndex }) => {
-  console.log('Moving task:', {
+  console.log('[BOARD] Moving task:', {
     task: task.title,
-    from: sourceColumnId,
-    fromIndex: sourceColumnIndex,
-    to: targetColumnId,
-    toIndex: targetIndex
+    from: `${sourceColumnId}[${sourceColumnIndex}]`,
+    to: `${targetColumnId}[${targetIndex}]`
   })
   
-  // Find source and target columns
   const sourceColumn = columns.value.find(col => col.id === sourceColumnId)
   const targetColumn = columns.value.find(col => col.id === targetColumnId)
   
-  if (!sourceColumn || !targetColumn) return
+  if (!sourceColumn || !targetColumn) {
+    console.error('[BOARD] Column not found')
+    return
+  }
   
-  // Create new arrays to minimize reactivity triggers
   if (sourceColumnId === targetColumnId) {
-    // Moving within same column - use a single operation
+    // Same column move
     const newTasks = [...sourceColumn.tasks]
     const [movedTask] = newTasks.splice(sourceColumnIndex, 1)
     const clampedIndex = Math.max(0, Math.min(targetIndex, newTasks.length))
     newTasks.splice(clampedIndex, 0, movedTask)
-    
-    // Replace entire array at once to minimize reactivity
     sourceColumn.tasks = newTasks
   } else {
-    // Moving between columns - batch the operations
+    // Cross-column move
     const sourceNewTasks = [...sourceColumn.tasks]
     const [movedTask] = sourceNewTasks.splice(sourceColumnIndex, 1)
     
@@ -115,15 +112,11 @@ const handleTaskMove = ({ task, sourceColumnId, sourceColumnIndex, targetColumnI
     const clampedIndex = Math.max(0, Math.min(targetIndex, targetNewTasks.length))
     targetNewTasks.splice(clampedIndex, 0, movedTask)
     
-    // Update both arrays at once
     sourceColumn.tasks = sourceNewTasks
     targetColumn.tasks = targetNewTasks
   }
   
-  console.log('Task moved successfully')
-  
-  // Here you would typically sync with your backend
-  // await api.moveTask(task.id, targetColumnId, clampedIndex)
+  console.log('[BOARD] Task moved successfully')
 }
 </script>
 
@@ -153,7 +146,6 @@ const handleTaskMove = ({ task, sourceColumnId, sourceColumnIndex, targetColumnI
   align-items: flex-start;
 }
 
-/* Custom scrollbar for horizontal scroll */
 .container::-webkit-scrollbar {
   height: 8px;
 }

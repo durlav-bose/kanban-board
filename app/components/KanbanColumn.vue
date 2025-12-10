@@ -10,7 +10,6 @@
       <span class="task-count">{{ column.tasks.length }}</span>
     </div>
     
-    <!-- Virtual Scroller -->
     <DynamicScroller
       ref="scroller"
       :items="column.tasks"
@@ -23,16 +22,13 @@
         <DynamicScrollerItem
           :item="item"
           :active="active"
-          :size-dependencies="[
-            item.title,
-            item.priority,
-          ]"
+          :size-dependencies="[item.title, item.priority]"
           :data-index="index"
         >
           <!-- Placeholder before task -->
           <transition name="placeholder-fade">
             <div 
-              v-if="shouldShowPlaceholderBefore(item.id, index)"
+              v-if="shouldShowPlaceholder(index)"
               class="task-placeholder"
               :style="{ height: `${dragDrop.placeholderHeight.value}px` }"
             >
@@ -40,17 +36,9 @@
             </div>
           </transition>
 
-          <!-- Task Card OR Source Placeholder -->
+          <!-- Task (hidden when being dragged) -->
           <div 
-            v-if="isTaskBeingDragged(item.id) && !hideOldPlaceholder"
-            class="task-placeholder source-placeholder"
-            :style="{ height: `${dragDrop.placeholderHeight.value}px` }"
-          >
-            <div class="placeholder-inner"></div>
-          </div>
-          
-          <div 
-            v-else
+            v-if="!isTaskBeingDragged(item.id)"
             class="task-wrapper"
             :data-task-index="index"
             :data-task-id="item.id"
@@ -66,7 +54,7 @@
           <!-- Placeholder after last task -->
           <transition name="placeholder-fade">
             <div 
-              v-if="shouldShowPlaceholderAfter(item.id, index)"
+              v-if="shouldShowPlaceholderAfter(index)"
               class="task-placeholder"
               :style="{ height: `${dragDrop.placeholderHeight.value}px` }"
             >
@@ -102,7 +90,7 @@
 </template>
 
 <script setup>
-import { ref, inject } from 'vue'
+import { ref, inject, onMounted, onUnmounted } from 'vue'
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
 import KanbanTask from './KanbanTask.vue'
@@ -127,64 +115,25 @@ const emit = defineEmits(['task-move'])
 const dragDrop = inject('kanbanDragDrop')
 const scroller = ref(null)
 
-// ✅ Check if this task is currently being dragged
+// Check if this task is being dragged
 const isTaskBeingDragged = (taskId) => {
+  return dragDrop.isDragging.value && dragDrop.draggedTask.value?.id === taskId
+}
+
+// Show placeholder at drop position
+const shouldShowPlaceholder = (index) => {
   return dragDrop.isDragging.value && 
-         dragDrop.draggedTask.value?.id === taskId &&
-         dragDrop.sourceColumnId.value === props.column.id
+         dragDrop.dropTargetColumnId.value === props.column.id && 
+         dragDrop.dropTargetIndex.value === index
 }
 
-let hideOldPlaceholder = ref(false);
-
-// ✅ Show placeholder before this task
-const shouldShowPlaceholderBefore = (taskId, index) => {
-  if (!dragDrop.isDragging.value) return false
-  if (dragDrop.dropTargetColumnId.value !== props.column.id) return false
-  
-  const isSameColumn = dragDrop.sourceColumnId.value === props.column.id
-  const sourceIndex = dragDrop.draggedTaskIndex.value
-  const dropIndex = dragDrop.dropTargetIndex.value
-  
-  if (isSameColumn) {
-    // ✅ CRITICAL: In same column, source placeholder serves as THE placeholder
-    // Only show additional placeholder if drop position is DIFFERENT from source
-    if (dropIndex === sourceIndex) {
-      // Dropping at same position - no additional placeholder needed
-      return false
-    }
-    
-    // Show placeholder at drop position, but NOT at source (source has its own placeholder)
-    if (index === sourceIndex) {
-      return false // Source already has placeholder
-    }
-
-    hideOldPlaceholder.value = true;
-    
-    return dropIndex === index
-  } else {
-    // Different column - show placeholder at drop position
-    return dropIndex === index
-  }
-}
-
-// ✅ Show placeholder after this task
-const shouldShowPlaceholderAfter = (taskId, index) => {
-  if (!dragDrop.isDragging.value) return false
-  if (dragDrop.dropTargetColumnId.value !== props.column.id) return false
-  
+// Show placeholder after last task
+const shouldShowPlaceholderAfter = (index) => {
   const isLast = index === props.column.tasks.length - 1
-  if (!isLast) return false
-  
-  const isSameColumn = dragDrop.sourceColumnId.value === props.column.id
-  const dropIndex = dragDrop.dropTargetIndex.value
-  
-  if (isSameColumn) {
-    // In same column, check if dropping after last task
-    return dropIndex > index
-  } else {
-    // Different column
-    return dropIndex > index
-  }
+  return dragDrop.isDragging.value && 
+         isLast && 
+         dragDrop.dropTargetColumnId.value === props.column.id && 
+         dragDrop.dropTargetIndex.value > index
 }
 
 const handleTaskDragStart = (event, task, index) => {
@@ -194,9 +143,8 @@ const handleTaskDragStart = (event, task, index) => {
   dragDrop.handleDragStart(event, task, props.column.id, index, element)
 }
 
-const handleTaskDragEnd = (event) => {
-  const element = event.target.closest('.task')
-  dragDrop.handleDragEnd(element)
+const handleTaskDragEnd = () => {
+  dragDrop.handleDragEnd()
 }
 
 const handleTaskDragOver = (event, index) => {
@@ -224,6 +172,25 @@ const forceUpdate = () => {
     scroller.value.forceUpdate()
   }
 }
+
+// ESC key to cancel drag
+let escapeHandler = null
+
+onMounted(() => {
+  escapeHandler = (e) => {
+    if (e.key === 'Escape' && dragDrop.isDragging.value) {
+      console.log('[ESC] Cancelling drag')
+      dragDrop.resetDragState()
+    }
+  }
+  window.addEventListener('keydown', escapeHandler)
+})
+
+onUnmounted(() => {
+  if (escapeHandler) {
+    window.removeEventListener('keydown', escapeHandler)
+  }
+})
 
 defineExpose({
   forceUpdate,
@@ -303,17 +270,12 @@ defineExpose({
 
 .task-placeholder {
   margin: 6px;
-  border: 2px dashed rgba(99, 102, 241, 0.6);
+  border: 2px dashed rgba(99, 102, 241, 0.7);
   border-radius: 8px;
   position: relative;
   overflow: hidden;
-  transition: height 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Source placeholder - same style but slightly different to differentiate */
-.source-placeholder {
-  border-color: rgba(99, 102, 241, 0.5);
-  background: rgba(99, 102, 241, 0.03);
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  background: rgba(99, 102, 241, 0.08);
 }
 
 .placeholder-inner {
@@ -322,10 +284,10 @@ defineExpose({
   background: linear-gradient(
     90deg,
     rgba(99, 102, 241, 0.0) 0%,
-    rgba(99, 102, 241, 0.2) 50%,
+    rgba(99, 102, 241, 0.3) 50%,
     rgba(99, 102, 241, 0.0) 100%
   );
-  animation: shimmer 1.5s infinite;
+  animation: shimmer 1.5s ease-in-out infinite;
 }
 
 @keyframes shimmer {
@@ -338,17 +300,17 @@ defineExpose({
 }
 
 .placeholder-fade-enter-active {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.12s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .placeholder-fade-leave-active {
-  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.08s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .placeholder-fade-enter-from,
 .placeholder-fade-leave-to {
   opacity: 0;
-  transform: scaleY(0.5);
+  transform: scaleY(0.7);
 }
 
 .empty-drop-zone {
@@ -357,6 +319,8 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .empty-state {
