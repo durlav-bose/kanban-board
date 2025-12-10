@@ -21,11 +21,89 @@ import { ref, provide } from 'vue'
 import { useKanbanDragDrop } from '@/composables/useKanbanDragDrop'
 import KanbanColumn from './KanbanColumn.vue'
 
-// Initialize drag and drop
-const dragDrop = useKanbanDragDrop()
+const handleDragStartRemove = (columnId, taskIndex) => {
+  const sourceColumn = columns.value.find(col => col.id === columnId)
+  if (!sourceColumn) return
+
+  // 1. Temporarily remove the task from the data array.
+  sourceColumn.tasks.splice(taskIndex, 1)
+
+  // 2. Force the scroller to update its cache
+  nextTick(() => { // ✅ Use nextTick instead of requestAnimationFrame for consistency
+    columnRefs.value[columnId]?.scroller?.forceUpdate()
+  })
+}
+
+// ✅ NEW FUNCTION: Handles re-insertion when drag is cancelled/aborted
+const handleDragCancelReinsert = () => {
+    // Retrieve necessary data from the drag state
+    const task = dragDrop.draggedTask.value
+    const columnId = dragDrop.sourceColumnId.value
+    const index = dragDrop.draggedTaskIndex.value
+    
+    // Safety check
+    if (!task || !columnId || index === null) return
+
+    const sourceColumn = columns.value.find(col => col.id === columnId)
+    if (!sourceColumn) return
+
+    // Re-insert the task at its original position
+    sourceColumn.tasks.splice(index, 0, task)
+    
+    // Force update the scroller
+    nextTick(() => {
+        columnRefs.value[columnId]?.scroller?.forceUpdate()
+    })
+    console.log('[BOARD] Task re-inserted on cancel:', task.title)
+}
+
+
+// ✅ CRITICAL FIX: Initialize drag and drop by passing ALL necessary handlers
+const dragDrop = useKanbanDragDrop({
+  handleDragStartRemove: handleDragStartRemove,
+  handleDragCancelReinsert: handleDragCancelReinsert // Pass new handler
+})
 
 // Provide to child components
 provide('kanbanDragDrop', dragDrop)
+
+// ✅ RESTORED/FIXED: Handle task movement (for successful drop)
+const handleTaskMove = async ({ task, sourceColumnId, sourceColumnIndex, targetColumnId, targetIndex }) => {
+  console.log('[BOARD] Moving task:', {
+    task: task.title,
+    from: `${sourceColumnId}[${sourceColumnIndex}]`,
+    to: `${targetColumnId}[${targetIndex}]`
+  })
+  
+  const targetColumn = columns.value.find(col => col.id === targetColumnId)
+  
+  if (!targetColumn) {
+    console.error('[BOARD] Target column not found')
+    // Since the task was already removed, we must re-insert it if target is invalid
+    handleDragCancelReinsert() 
+    return
+  }
+  
+  // NOTE: The task was already removed from the source array in handleDragStartRemove.
+  // We only need to insert it into the target column here.
+  
+  const targetNewTasks = [...targetColumn.tasks]
+  // Correctly insert the task at the target index
+  const clampedIndex = Math.max(0, Math.min(targetIndex, targetNewTasks.length))
+  targetNewTasks.splice(clampedIndex, 0, task) 
+  
+  targetColumn.tasks = targetNewTasks
+  
+  // Force update the scroller(s)
+  await nextTick()
+  const sourceRef = columnRefs.value[sourceColumnId] 
+  const targetRef = columnRefs.value[targetColumnId]
+  
+  if (sourceRef && sourceRef.forceUpdate) sourceRef.forceUpdate()
+  if (targetRef && targetRef.forceUpdate) targetRef.forceUpdate()
+  
+  console.log('[BOARD] Task moved successfully')
+}
 
 // Track column refs
 const columnRefs = ref({})
@@ -80,44 +158,100 @@ const columns = ref([
   }
 ])
 
+
 // Handle task movement
-const handleTaskMove = ({ task, sourceColumnId, sourceColumnIndex, targetColumnId, targetIndex }) => {
-  console.log('[BOARD] Moving task:', {
-    task: task.title,
-    from: `${sourceColumnId}[${sourceColumnIndex}]`,
-    to: `${targetColumnId}[${targetIndex}]`
-  })
+// const handleTaskMove = ({ task, sourceColumnId, sourceColumnIndex, targetColumnId, targetIndex }) => {
+//   console.log('[BOARD] Moving task:', {
+//     task: task.title,
+//     from: `${sourceColumnId}[${sourceColumnIndex}]`,
+//     to: `${targetColumnId}[${targetIndex}]`
+//   })
   
-  const sourceColumn = columns.value.find(col => col.id === sourceColumnId)
-  const targetColumn = columns.value.find(col => col.id === targetColumnId)
+//   const sourceColumn = columns.value.find(col => col.id === sourceColumnId)
+//   const targetColumn = columns.value.find(col => col.id === targetColumnId)
   
-  if (!sourceColumn || !targetColumn) {
-    console.error('[BOARD] Column not found')
-    return
-  }
+//   if (!sourceColumn || !targetColumn) {
+//     console.error('[BOARD] Column not found')
+//     return
+//   }
   
-  if (sourceColumnId === targetColumnId) {
-    // Same column move
-    const newTasks = [...sourceColumn.tasks]
-    const [movedTask] = newTasks.splice(sourceColumnIndex, 1)
-    const clampedIndex = Math.max(0, Math.min(targetIndex, newTasks.length))
-    newTasks.splice(clampedIndex, 0, movedTask)
-    sourceColumn.tasks = newTasks
-  } else {
-    // Cross-column move
-    const sourceNewTasks = [...sourceColumn.tasks]
-    const [movedTask] = sourceNewTasks.splice(sourceColumnIndex, 1)
+//   if (sourceColumnId === targetColumnId) {
+//     // Same column move
+//     const newTasks = [...sourceColumn.tasks]
+//     const [movedTask] = newTasks.splice(sourceColumnIndex, 1)
+//     const clampedIndex = Math.max(0, Math.min(targetIndex, newTasks.length))
+//     newTasks.splice(clampedIndex, 0, movedTask)
+//     sourceColumn.tasks = newTasks
+//   } else {
+//     // Cross-column move
+//     const sourceNewTasks = [...sourceColumn.tasks]
+//     const [movedTask] = sourceNewTasks.splice(sourceColumnIndex, 1)
     
-    const targetNewTasks = [...targetColumn.tasks]
-    const clampedIndex = Math.max(0, Math.min(targetIndex, targetNewTasks.length))
-    targetNewTasks.splice(clampedIndex, 0, movedTask)
+//     const targetNewTasks = [...targetColumn.tasks]
+//     const clampedIndex = Math.max(0, Math.min(targetIndex, targetNewTasks.length))
+//     targetNewTasks.splice(clampedIndex, 0, movedTask)
     
-    sourceColumn.tasks = sourceNewTasks
-    targetColumn.tasks = targetNewTasks
-  }
+//     sourceColumn.tasks = sourceNewTasks
+//     targetColumn.tasks = targetNewTasks
+//   }
   
-  console.log('[BOARD] Task moved successfully')
-}
+//   console.log('[BOARD] Task moved successfully')
+// }
+
+// const handleTaskMove = async ({ task, sourceColumnId, sourceColumnIndex, targetColumnId, targetIndex }) => {
+//   console.log('[BOARD] Moving task:', {
+//     task: task.title,
+//     from: `${sourceColumnId}[${sourceColumnIndex}]`,
+//     to: `${targetColumnId}[${targetIndex}]`
+//   })
+  
+//   const sourceColumn = columns.value.find(col => col.id === sourceColumnId)
+//   const targetColumn = columns.value.find(col => col.id === targetColumnId)
+  
+//   if (!sourceColumn || !targetColumn) {
+//     console.error('[BOARD] Column not found')
+//     return
+//   }
+  
+//   // Create new arrays to trigger reactivity
+//   if (sourceColumnId === targetColumnId) {
+//     // Same column move
+//     const newTasks = [...sourceColumn.tasks]
+//     const [movedTask] = newTasks.splice(sourceColumnIndex, 1)
+//     const clampedIndex = Math.max(0, Math.min(targetIndex, newTasks.length))
+//     newTasks.splice(clampedIndex, 0, movedTask)
+//     sourceColumn.tasks = newTasks
+    
+//     // Force update the column's virtual scroller
+//     await nextTick()
+//     const columnRef = columnRefs.value[sourceColumnId]
+//     if (columnRef && columnRef.forceUpdate) {
+//       columnRef.forceUpdate()
+//     }
+//   } else {
+//     // Cross-column move
+//     const sourceNewTasks = [...sourceColumn.tasks]
+//     const [movedTask] = sourceNewTasks.splice(sourceColumnIndex, 1)
+    
+//     const targetNewTasks = [...targetColumn.tasks]
+//     const clampedIndex = Math.max(0, Math.min(targetIndex, targetNewTasks.length))
+//     targetNewTasks.splice(clampedIndex, 0, movedTask)
+    
+//     // Update both columns
+//     sourceColumn.tasks = sourceNewTasks
+//     targetColumn.tasks = targetNewTasks
+    
+//     // Force update both column virtual scrollers
+//     await nextTick()
+//     const sourceRef = columnRefs.value[sourceColumnId]
+//     const targetRef = columnRefs.value[targetColumnId]
+    
+//     if (sourceRef && sourceRef.forceUpdate) sourceRef.forceUpdate()
+//     if (targetRef && targetRef.forceUpdate) targetRef.forceUpdate()
+//   }
+  
+//   console.log('[BOARD] Task moved successfully')
+// }
 </script>
 
 <style scoped>

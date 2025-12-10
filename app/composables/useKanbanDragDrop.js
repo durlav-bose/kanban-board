@@ -1,11 +1,16 @@
 import { ref, nextTick } from 'vue'
 
-export const useKanbanDragDrop = () => {
+export const useKanbanDragDrop = (options) => {
   // Drag state
   const draggedTask = ref(null)
   const sourceColumnId = ref(null)
   const draggedTaskIndex = ref(null)
   const isDragging = ref(false)
+
+  // const isTaskVisible = ref(true)
+
+  const handleDragStartRemove = options.handleDragStartRemove
+  const handleDragCancelReinsert = options.handleDragCancelReinsert
   
   // Drop target state
   const dropTargetColumnId = ref(null)
@@ -53,13 +58,20 @@ export const useKanbanDragDrop = () => {
       }
     }, 0)
     
-    // ✅ CRITICAL: Set isDragging LAST, in next tick
-    // This ensures all state is set before rendering changes
+    // 1. Set isDragging immediately (or in requestAnimationFrame/setTimeout(0))
+    // This allows the column/placeholder logic to start.
     requestAnimationFrame(() => {
       isDragging.value = true
       dropTargetColumnId.value = columnId
       dropTargetIndex.value = taskIndex
     })
+    
+    if (handleDragStartRemove) {
+            // Wait for one frame to ensure isDragging is set and drag image is captured
+            setTimeout(() => {
+                 handleDragStartRemove(columnId, taskIndex)
+            }, 0) // or 10ms if 0 is still flaky
+        }
   }
 
   // ✅ SIMPLE DRAG OVER - Just update position
@@ -151,15 +163,20 @@ export const useKanbanDragDrop = () => {
     resetDragState()
   }
 
-  // ✅ SIMPLE DRAG END - Always reset
   const handleDragEnd = () => {
     console.log('[DRAG END]')
     
-    // ✅ CRITICAL: Small delay to let drop fire first if it's going to
-    // But SHORT delay - only 16ms (one frame)
+    // CRITICAL: Small delay to let drop fire first if it's going to
     requestAnimationFrame(() => {
       if (isDragging.value) {
+        // This runs if drop() did NOT fire before dragend (i.e., drag cancelled)
         console.log('[DRAG END] Resetting (drag cancelled)')
+        
+        // ✅ Call re-insertion logic before resetting state
+        if (handleDragCancelReinsert) {
+            handleDragCancelReinsert()
+        }
+        
         resetDragState()
       }
     })

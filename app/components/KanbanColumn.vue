@@ -37,7 +37,7 @@
           </transition>
 
           <!-- Task (hidden when being dragged) -->
-          <div 
+          <!-- <div 
             v-if="!isTaskBeingDragged(item.id)"
             class="task-wrapper"
             :data-task-index="index"
@@ -49,7 +49,20 @@
               @dragstart="handleTaskDragStart($event, item, index)"
               @dragend="handleTaskDragEnd"
             />
-          </div>
+          </div> -->
+
+          <div 
+    class="task-wrapper"
+    :data-task-index="index"
+    :data-task-id="item.id"
+    @dragover.prevent="handleTaskDragOver($event, index)"
+  >
+    <KanbanTask
+      :task="item"
+      @dragstart="handleTaskDragStart($event, item, index)"
+      @dragend="handleTaskDragEnd"
+    />
+  </div>
 
           <!-- Placeholder after last task -->
           <transition name="placeholder-fade">
@@ -115,10 +128,7 @@ const emit = defineEmits(['task-move'])
 const dragDrop = inject('kanbanDragDrop')
 const scroller = ref(null)
 
-// Check if this task is being dragged
-const isTaskBeingDragged = (taskId) => {
-  return dragDrop.isDragging.value && dragDrop.draggedTask.value?.id === taskId
-}
+
 
 // Show placeholder at drop position
 const shouldShowPlaceholder = (index) => {
