@@ -10,10 +10,10 @@
       <span class="task-count">{{ column.tasks.length }}</span>
     </div>
     
-    <!-- Virtual Scroller - MUST USE visibleTasks! -->
+    <!-- Virtual Scroller -->
     <DynamicScroller
       ref="scroller"
-      :items="visibleTasks"
+      :items="column.tasks"
       :min-item-size="minItemSize"
       class="tasks-scroller"
       key-field="id"
@@ -27,12 +27,12 @@
             item.title,
             item.priority,
           ]"
-          :data-index="getOriginalIndex(item.id)"
+          :data-index="index"
         >
           <!-- Placeholder before task -->
           <transition name="placeholder-fade">
             <div 
-              v-if="dragDrop.shouldShowPlaceholderBefore(column.id, getOriginalIndex(item.id))"
+              v-if="shouldShowPlaceholderBefore(item.id, index)"
               class="task-placeholder"
               :style="{ height: `${dragDrop.placeholderHeight.value}px` }"
             >
@@ -40,12 +40,21 @@
             </div>
           </transition>
 
-          <!-- Task Card Wrapper - dragover on wrapper for better hit detection -->
+          <!-- Task Card OR Source Placeholder -->
           <div 
+            v-if="isTaskBeingDragged(item.id) && !hideOldPlaceholder"
+            class="task-placeholder source-placeholder"
+            :style="{ height: `${dragDrop.placeholderHeight.value}px` }"
+          >
+            <div class="placeholder-inner"></div>
+          </div>
+          
+          <div 
+            v-else
             class="task-wrapper"
-            :data-task-index="getOriginalIndex(item.id)"
+            :data-task-index="index"
             :data-task-id="item.id"
-            @dragover.prevent="handleTaskDragOver($event, getOriginalIndex(item.id))"
+            @dragover.prevent="handleTaskDragOver($event, index)"
           >
             <KanbanTask
               :task="item"
@@ -57,7 +66,7 @@
           <!-- Placeholder after last task -->
           <transition name="placeholder-fade">
             <div 
-              v-if="dragDrop.shouldShowPlaceholderAfter(column.id, getOriginalIndex(item.id), index === visibleTasks.length - 1, column.tasks.length)"
+              v-if="shouldShowPlaceholderAfter(item.id, index)"
               class="task-placeholder"
               :style="{ height: `${dragDrop.placeholderHeight.value}px` }"
             >
@@ -68,7 +77,7 @@
       </template>
       
       <!-- Empty column drop zone -->
-      <template #after v-if="visibleTasks.length === 0">
+      <template #after v-if="column.tasks.length === 0">
         <div 
           class="empty-drop-zone"
           @dragover.prevent="handleEmptyDragOver"
@@ -93,7 +102,7 @@
 </template>
 
 <script setup>
-import { ref, inject, computed } from 'vue'
+import { ref, inject } from 'vue'
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
 import KanbanTask from './KanbanTask.vue'
@@ -118,30 +127,71 @@ const emit = defineEmits(['task-move'])
 const dragDrop = inject('kanbanDragDrop')
 const scroller = ref(null)
 
-// ✅ CRITICAL: Filter out dragged task
-const visibleTasks = computed(() => {
-  if (!dragDrop.isDragging.value) {
-    return props.column.tasks
-  }
-  
-  if (dragDrop.sourceColumnId.value === props.column.id && dragDrop.draggedTask.value) {
-    return props.column.tasks.filter(task => task.id !== dragDrop.draggedTask.value.id)
-  }
-  
-  return props.column.tasks
-})
-
-// ✅ CRITICAL: Get original index from full array
-const getOriginalIndex = (taskId) => {
-  return props.column.tasks.findIndex(t => t.id === taskId)
+// ✅ Check if this task is currently being dragged
+const isTaskBeingDragged = (taskId) => {
+  return dragDrop.isDragging.value && 
+         dragDrop.draggedTask.value?.id === taskId &&
+         dragDrop.sourceColumnId.value === props.column.id
 }
 
-const handleTaskDragStart = (event, task, visibleIndex) => {
+let hideOldPlaceholder = ref(false);
+
+// ✅ Show placeholder before this task
+const shouldShowPlaceholderBefore = (taskId, index) => {
+  if (!dragDrop.isDragging.value) return false
+  if (dragDrop.dropTargetColumnId.value !== props.column.id) return false
+  
+  const isSameColumn = dragDrop.sourceColumnId.value === props.column.id
+  const sourceIndex = dragDrop.draggedTaskIndex.value
+  const dropIndex = dragDrop.dropTargetIndex.value
+  
+  if (isSameColumn) {
+    // ✅ CRITICAL: In same column, source placeholder serves as THE placeholder
+    // Only show additional placeholder if drop position is DIFFERENT from source
+    if (dropIndex === sourceIndex) {
+      // Dropping at same position - no additional placeholder needed
+      return false
+    }
+    
+    // Show placeholder at drop position, but NOT at source (source has its own placeholder)
+    if (index === sourceIndex) {
+      return false // Source already has placeholder
+    }
+
+    hideOldPlaceholder.value = true;
+    
+    return dropIndex === index
+  } else {
+    // Different column - show placeholder at drop position
+    return dropIndex === index
+  }
+}
+
+// ✅ Show placeholder after this task
+const shouldShowPlaceholderAfter = (taskId, index) => {
+  if (!dragDrop.isDragging.value) return false
+  if (dragDrop.dropTargetColumnId.value !== props.column.id) return false
+  
+  const isLast = index === props.column.tasks.length - 1
+  if (!isLast) return false
+  
+  const isSameColumn = dragDrop.sourceColumnId.value === props.column.id
+  const dropIndex = dragDrop.dropTargetIndex.value
+  
+  if (isSameColumn) {
+    // In same column, check if dropping after last task
+    return dropIndex > index
+  } else {
+    // Different column
+    return dropIndex > index
+  }
+}
+
+const handleTaskDragStart = (event, task, index) => {
   const element = event.target.closest('.task')
   if (!element) return
   
-  const originalIndex = getOriginalIndex(task.id)
-  dragDrop.handleDragStart(event, task, props.column.id, originalIndex, element)
+  dragDrop.handleDragStart(event, task, props.column.id, index, element)
 }
 
 const handleTaskDragEnd = (event) => {
@@ -149,10 +199,9 @@ const handleTaskDragEnd = (event) => {
   dragDrop.handleDragEnd(element)
 }
 
-// ✅ CRITICAL: This receives ORIGINAL index, not visible index
-const handleTaskDragOver = (event, originalIndex) => {
-  event.stopPropagation() // Prevent column handler from firing
-  dragDrop.handleDragOver(event, props.column.id, originalIndex)
+const handleTaskDragOver = (event, index) => {
+  event.stopPropagation()
+  dragDrop.handleDragOver(event, props.column.id, index)
 }
 
 const handleColumnDragOver = (event) => {
@@ -250,7 +299,6 @@ defineExpose({
 
 .task-wrapper {
   padding: 6px;
-  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .task-placeholder {
@@ -259,7 +307,13 @@ defineExpose({
   border-radius: 8px;
   position: relative;
   overflow: hidden;
-  transition: height 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: height 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Source placeholder - same style but slightly different to differentiate */
+.source-placeholder {
+  border-color: rgba(99, 102, 241, 0.5);
+  background: rgba(99, 102, 241, 0.03);
 }
 
 .placeholder-inner {
@@ -283,7 +337,10 @@ defineExpose({
   }
 }
 
-.placeholder-fade-enter-active,
+.placeholder-fade-enter-active {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 .placeholder-fade-leave-active {
   transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }

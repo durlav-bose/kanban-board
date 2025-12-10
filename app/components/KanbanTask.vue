@@ -1,7 +1,6 @@
 <template>
   <div 
     class="task"
-    :class="{ 'is-dragging': isDragging }"
     :data-task-id="task.id"
     draggable="true"
     @dragstart="$emit('dragstart', $event)"
@@ -30,10 +29,6 @@ defineProps({
   task: {
     type: Object,
     required: true
-  },
-  isDragging: {
-    type: Boolean,
-    default: false
   }
 })
 
@@ -50,21 +45,17 @@ defineEmits(['dragstart', 'dragend', 'dragover'])
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
   user-select: none;
   position: relative;
+  opacity: 1;
 }
 
 .task:hover {
   border-color: #6366f1;
   box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
   background: linear-gradient(135deg, #3b4d65 0%, #242e3f 100%);
-  transform: translateY(-2px);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  /* transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); */
 }
 
 .task:active {
-  cursor: grabbing;
-}
-
-.task.is-dragging {
   cursor: grabbing;
 }
 

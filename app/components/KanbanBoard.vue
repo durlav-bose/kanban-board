@@ -80,7 +80,7 @@ const columns = ref([
   }
 ])
 
-// Handle task movement - ONLY called on drop, not during drag
+// ✅ FIXED: Handle task movement with minimal reactivity to prevent blinking
 const handleTaskMove = ({ task, sourceColumnId, sourceColumnIndex, targetColumnId, targetIndex }) => {
   console.log('Moving task:', {
     task: task.title,
@@ -96,17 +96,31 @@ const handleTaskMove = ({ task, sourceColumnId, sourceColumnIndex, targetColumnI
   
   if (!sourceColumn || !targetColumn) return
   
-  // Remove from source using the provided source index
-  const [movedTask] = sourceColumn.tasks.splice(sourceColumnIndex, 1)
+  // Create new arrays to minimize reactivity triggers
+  if (sourceColumnId === targetColumnId) {
+    // Moving within same column - use a single operation
+    const newTasks = [...sourceColumn.tasks]
+    const [movedTask] = newTasks.splice(sourceColumnIndex, 1)
+    const clampedIndex = Math.max(0, Math.min(targetIndex, newTasks.length))
+    newTasks.splice(clampedIndex, 0, movedTask)
+    
+    // Replace entire array at once to minimize reactivity
+    sourceColumn.tasks = newTasks
+  } else {
+    // Moving between columns - batch the operations
+    const sourceNewTasks = [...sourceColumn.tasks]
+    const [movedTask] = sourceNewTasks.splice(sourceColumnIndex, 1)
+    
+    const targetNewTasks = [...targetColumn.tasks]
+    const clampedIndex = Math.max(0, Math.min(targetIndex, targetNewTasks.length))
+    targetNewTasks.splice(clampedIndex, 0, movedTask)
+    
+    // Update both arrays at once
+    sourceColumn.tasks = sourceNewTasks
+    targetColumn.tasks = targetNewTasks
+  }
   
-  // Clamp target index to valid range
-  const maxIndex = targetColumn.tasks.length
-  const clampedIndex = Math.max(0, Math.min(targetIndex, maxIndex))
-  
-  // Add to target at clamped index
-  targetColumn.tasks.splice(clampedIndex, 0, movedTask)
-  
-  console.log('Task moved successfully to index:', clampedIndex)
+  console.log('Task moved successfully')
   
   // Here you would typically sync with your backend
   // await api.moveTask(task.id, targetColumnId, clampedIndex)

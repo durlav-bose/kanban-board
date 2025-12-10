@@ -18,6 +18,8 @@ export const useKanbanDragDrop = () => {
 
   // Start dragging
   const handleDragStart = (event, task, columnId, taskIndex, element) => {
+    console.log('[DRAG START]', { event, task: task.title, columnId, taskIndex, element })
+    
     draggedTask.value = task
     sourceColumnId.value = columnId
     draggedTaskIndex.value = taskIndex
@@ -31,12 +33,13 @@ export const useKanbanDragDrop = () => {
       columnId: columnId
     }))
     
+    // Create custom drag image
     const dragImage = element.cloneNode(true)
     dragImage.style.position = 'absolute'
     dragImage.style.top = '-9999px'
     dragImage.style.left = '-9999px'
     dragImage.style.width = `${element.offsetWidth}px`
-    dragImage.style.opacity = '0.95'
+    dragImage.style.opacity = '1.0'
     dragImage.style.transform = 'rotate(2deg) scale(1.02)'
     dragImage.style.border = '2px solid #6366f1'
     dragImage.style.boxShadow = '0 12px 24px rgba(99, 102, 241, 0.5)'
@@ -57,13 +60,10 @@ export const useKanbanDragDrop = () => {
     }, 0)
     
     setTimeout(() => {
-      if (element) {
-        element.classList.add('dragging')
-      }
-    }, 0)
-    
-    setTimeout(() => {
       isDragging.value = true
+      // Initialize drop target to source position
+      dropTargetColumnId.value = columnId
+      dropTargetIndex.value = taskIndex
     }, 0)
   }
 
@@ -72,10 +72,8 @@ export const useKanbanDragDrop = () => {
     if (!isDragging.value) return
     
     event.preventDefault()
-    event.stopPropagation() // ✅ CRITICAL: Stop event from bubbling to column handler
+    event.stopPropagation()
     event.dataTransfer.dropEffect = 'move'
-    
-    dropTargetColumnId.value = columnId
     
     const target = event.target.closest('[data-task-index]')
     if (target) {
@@ -83,15 +81,16 @@ export const useKanbanDragDrop = () => {
       const midPoint = rect.top + rect.height / 2
       const mouseY = event.clientY
       
-      const isSameColumn = sourceColumnId.value === columnId
-      
+      let newIndex
       if (mouseY < midPoint) {
-        dropTargetIndex.value = taskIndex
-        console.log(`[DRAGOVER] Before task@${taskIndex}, sameCol=${isSameColumn}, dropIdx=${taskIndex}`)
+        newIndex = taskIndex
       } else {
-        dropTargetIndex.value = taskIndex + 1
-        console.log(`[DRAGOVER] After task@${taskIndex}, sameCol=${isSameColumn}, dropIdx=${taskIndex + 1}`)
+        newIndex = taskIndex + 1
       }
+      
+      // Update placeholder position
+      dropTargetColumnId.value = columnId
+      dropTargetIndex.value = newIndex
     }
   }
 
@@ -113,13 +112,9 @@ export const useKanbanDragDrop = () => {
     
     dropTargetColumnId.value = columnId
     
-    // ✅ CRITICAL: Only set to end if we don't have a specific target yet
-    // This prevents overriding the dropTargetIndex set by handleDragOver
+    // Only set to end if we don't have a specific target
     if (dropTargetIndex.value === null || dropTargetIndex.value === undefined) {
       dropTargetIndex.value = taskCount
-      console.log(`[COL-DRAGOVER] Set to end: dropIdx=${taskCount}`)
-    } else {
-      console.log(`[COL-DRAGOVER] Keeping existing dropIdx=${dropTargetIndex.value}`)
     }
   }
 
@@ -127,7 +122,12 @@ export const useKanbanDragDrop = () => {
     event.preventDefault()
     event.stopPropagation()
     
-    if (!draggedTask.value || !isDragging.value) return
+    console.log('[DROP START]', { isDragging: isDragging.value, draggedTask: draggedTask.value })
+    
+    if (!draggedTask.value || !isDragging.value) {
+      console.log('[DROP] Aborted - invalid state')
+      return
+    }
     
     const targetColumnId = dropTargetColumnId.value || columnId
     let targetIndex = dropTargetIndex.value
@@ -145,7 +145,7 @@ export const useKanbanDragDrop = () => {
       sourceCol,
       sourceIdx,
       targetCol: targetColumnId,
-      rawDropIdx: dropTargetIndex.value,
+      rawDropIdx: targetIndex,
       sameColumn: sourceCol === targetColumnId
     })
     
@@ -163,8 +163,10 @@ export const useKanbanDragDrop = () => {
       to: `${targetColumnId}[${targetIndex}]`
     })
     
+    // Mark that drop occurred
     dropOccurred.value = true
     
+    // Execute the move
     if (onTaskMove) {
       onTaskMove({
         task: taskToMove,
@@ -175,24 +177,26 @@ export const useKanbanDragDrop = () => {
       })
     }
     
-    setTimeout(() => {
-      resetDragState()
-    }, 10)
+    // Reset immediately after move
+    console.log('[DROP] Resetting state')
+    resetDragState()
   }
 
   const handleDragEnd = (element) => {
-    if (element) {
-      element.classList.remove('dragging')
-    }
+    console.log('[DRAG END]', { dropOccurred: dropOccurred.value })
     
-    setTimeout(() => {
-      if (!dropOccurred.value) {
-        resetDragState()
-      }
-    }, 20)
+    // Only reset if drop didn't occur (drag was cancelled)
+    if (!dropOccurred.value) {
+      console.log('[DRAG END] No drop occurred, resetting')
+      resetDragState()
+    } else {
+      console.log('[DRAG END] Drop occurred, state already reset')
+    }
   }
 
   const resetDragState = () => {
+    console.log('[RESET] Clearing all drag state')
+    
     isDragging.value = false
     draggedTask.value = null
     sourceColumnId.value = null
@@ -203,12 +207,10 @@ export const useKanbanDragDrop = () => {
     dropOccurred.value = false
   }
 
-  // ✅ FIXED: Only 2 parameters to match KanbanColumn calls
   const shouldShowPlaceholderBefore = (columnId, taskIndex) => {
     if (!isDragging.value) return false
     if (dropTargetColumnId.value !== columnId) return false
     
-    // Direct comparison - both are in original array space
     return dropTargetIndex.value === taskIndex
   }
 
@@ -217,7 +219,6 @@ export const useKanbanDragDrop = () => {
     if (!isLast) return false
     if (dropTargetColumnId.value !== columnId) return false
     
-    // Show if dropping beyond the last task
     return dropTargetIndex.value > taskIndex
   }
 
@@ -231,10 +232,6 @@ export const useKanbanDragDrop = () => {
 
   const isTaskDragging = (taskId) => {
     return isDragging.value && draggedTask.value?.id === taskId
-  }
-
-  const getDragOpacity = (taskId) => {
-    return isTaskDragging(taskId) ? 0.3 : 1
   }
 
   return {
@@ -258,6 +255,5 @@ export const useKanbanDragDrop = () => {
     shouldShowPlaceholderAfter,
     shouldShowEmptyPlaceholder,
     isTaskDragging,
-    getDragOpacity,
   }
 }
