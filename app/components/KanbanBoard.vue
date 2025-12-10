@@ -68,6 +68,43 @@ const dragDrop = useKanbanDragDrop({
 provide('kanbanDragDrop', dragDrop)
 
 // ✅ RESTORED/FIXED: Handle task movement (for successful drop)
+// const handleTaskMove = async ({ task, sourceColumnId, sourceColumnIndex, targetColumnId, targetIndex }) => {
+//   console.log('[BOARD] Moving task:', {
+//     task: task.title,
+//     from: `${sourceColumnId}[${sourceColumnIndex}]`,
+//     to: `${targetColumnId}[${targetIndex}]`
+//   })
+  
+//   const targetColumn = columns.value.find(col => col.id === targetColumnId)
+  
+//   if (!targetColumn) {
+//     console.error('[BOARD] Target column not found')
+//     // Since the task was already removed, we must re-insert it if target is invalid
+//     handleDragCancelReinsert() 
+//     return
+//   }
+  
+//   // NOTE: The task was already removed from the source array in handleDragStartRemove.
+//   // We only need to insert it into the target column here.
+  
+//   const targetNewTasks = [...targetColumn.tasks]
+//   // Correctly insert the task at the target index
+//   const clampedIndex = Math.max(0, Math.min(targetIndex, targetNewTasks.length))
+//   targetNewTasks.splice(clampedIndex, 0, task) 
+  
+//   targetColumn.tasks = targetNewTasks
+  
+//   // Force update the scroller(s)
+//   await nextTick()
+//   const sourceRef = columnRefs.value[sourceColumnId] 
+//   const targetRef = columnRefs.value[targetColumnId]
+  
+//   if (sourceRef && sourceRef.forceUpdate) sourceRef.forceUpdate()
+//   if (targetRef && targetRef.forceUpdate) targetRef.forceUpdate()
+  
+//   console.log('[BOARD] Task moved successfully')
+// }
+
 const handleTaskMove = async ({ task, sourceColumnId, sourceColumnIndex, targetColumnId, targetIndex }) => {
   console.log('[BOARD] Moving task:', {
     task: task.title,
@@ -79,16 +116,18 @@ const handleTaskMove = async ({ task, sourceColumnId, sourceColumnIndex, targetC
   
   if (!targetColumn) {
     console.error('[BOARD] Target column not found')
-    // Since the task was already removed, we must re-insert it if target is invalid
-    handleDragCancelReinsert() 
+    // If the target is invalid, re-insert the task back at the source
+    dragDrop.handleDragCancelReinsert() 
     return
   }
   
   // NOTE: The task was already removed from the source array in handleDragStartRemove.
   // We only need to insert it into the target column here.
   
+  // Create a new array to ensure reactivity update
   const targetNewTasks = [...targetColumn.tasks]
-  // Correctly insert the task at the target index
+  
+  // Insert the task at the calculated target index
   const clampedIndex = Math.max(0, Math.min(targetIndex, targetNewTasks.length))
   targetNewTasks.splice(clampedIndex, 0, task) 
   

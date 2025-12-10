@@ -70,7 +70,7 @@ export const useKanbanDragDrop = (options) => {
             // Wait for one frame to ensure isDragging is set and drag image is captured
             setTimeout(() => {
                  handleDragStartRemove(columnId, taskIndex)
-            }, 0) // or 10ms if 0 is still flaky
+            }, 50) // or 10ms if 0 is still flaky
         }
   }
 
@@ -143,9 +143,9 @@ export const useKanbanDragDrop = (options) => {
     const sourceIdx = draggedTaskIndex.value
     
     // Adjust index for same column moves
-    if (sourceCol === targetColumnId && targetIndex > sourceIdx) {
-      targetIndex = targetIndex - 1
-    }
+    // if (sourceCol === targetColumnId && targetIndex > sourceIdx) {
+    //   targetIndex = targetIndex - 1
+    // }
     
     // Execute move callback
     if (onTaskMove) {
@@ -154,12 +154,10 @@ export const useKanbanDragDrop = (options) => {
         sourceColumnId: sourceCol,
         sourceColumnIndex: sourceIdx,
         targetColumnId,
-        targetIndex
+        targetIndex // This index is now correct for the shortened array
       })
     }
     
-    // ✅ CRITICAL: Reset IMMEDIATELY after move
-    // No waiting, no delays - just reset
     resetDragState()
   }
 

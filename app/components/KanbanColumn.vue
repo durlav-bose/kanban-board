@@ -36,9 +36,7 @@
             </div>
           </transition>
 
-          <!-- Task (hidden when being dragged) -->
-          <!-- <div 
-            v-if="!isTaskBeingDragged(item.id)"
+          <div 
             class="task-wrapper"
             :data-task-index="index"
             :data-task-id="item.id"
@@ -49,20 +47,7 @@
               @dragstart="handleTaskDragStart($event, item, index)"
               @dragend="handleTaskDragEnd"
             />
-          </div> -->
-
-          <div 
-    class="task-wrapper"
-    :data-task-index="index"
-    :data-task-id="item.id"
-    @dragover.prevent="handleTaskDragOver($event, index)"
-  >
-    <KanbanTask
-      :task="item"
-      @dragstart="handleTaskDragStart($event, item, index)"
-      @dragend="handleTaskDragEnd"
-    />
-  </div>
+          </div>
 
           <!-- Placeholder after last task -->
           <transition name="placeholder-fade">
