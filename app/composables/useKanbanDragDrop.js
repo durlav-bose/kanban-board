@@ -1,43 +1,40 @@
 import { ref } from 'vue'
 
 /**
- * Kanban Drag & Drop - Linear Style
+ * Kanban Drag & Drop Composable
  * 
- * Key principles:
- * - Don't filter the list (causes RecycleScroller re-render which cancels drag)
- * - Hide dragged task with CSS opacity
- * - Use placeholder space that pushes other tasks down
- * - Delay isDragging to allow native drag to initialize
+ * Simple and reliable implementation:
+ * - Source task becomes invisible (opacity: 0)
+ * - Floating placeholder shows drop position
+ * - Tasks shift down via CSS class
  */
 export function useKanbanDragDrop() {
-  // ============ DRAG STATE ============
+  // Drag state
   const isDragging = ref(false)
   const draggedTask = ref(null)
   const sourceColumnId = ref(null)
   const sourceIndex = ref(null)
-  const placeholderHeight = ref(88)
+  const placeholderHeight = ref(80)
 
-  // Drop target tracking
+  // Drop target
   const dropTargetColumnId = ref(null)
   const dropTargetIndex = ref(null)
 
   // ============ DRAG START ============
   const handleDragStart = (event, task, columnId, index, element) => {
-    console.log('[DRAG] Start:', task.title, 'from', columnId, 'at index', index)
+    console.log('[DRAG START]', task.title, 'from', columnId, 'index', index)
 
-    // Set data BEFORE isDragging (prevents CSS from canceling drag)
+    // Store drag data
     draggedTask.value = { ...task }
     sourceColumnId.value = columnId
     sourceIndex.value = index
+    dropTargetColumnId.value = columnId
+    dropTargetIndex.value = index
 
-    // Capture height
+    // Get element height
     if (element) {
       placeholderHeight.value = element.getBoundingClientRect().height
     }
-
-    // Initialize drop target
-    dropTargetColumnId.value = columnId
-    dropTargetIndex.value = index
 
     // Set drag data
     event.dataTransfer.effectAllowed = 'move'
@@ -45,45 +42,31 @@ export function useKanbanDragDrop() {
 
     // Custom drag image
     if (element) {
-      createDragImage(event, element)
+      const rect = element.getBoundingClientRect()
+      const clone = element.cloneNode(true)
+      
+      clone.style.cssText = `
+        position: fixed;
+        top: -9999px;
+        left: -9999px;
+        width: ${rect.width}px;
+        opacity: 0.9;
+        transform: rotate(2deg);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+        border-radius: 8px;
+        pointer-events: none;
+      `
+      
+      document.body.appendChild(clone)
+      event.dataTransfer.setDragImage(clone, event.clientX - rect.left, event.clientY - rect.top)
+      
+      setTimeout(() => clone.remove(), 0)
     }
 
-    // CRITICAL: Delay isDragging to let drag event fully initialize
+    // Delay state change to allow drag to start
     requestAnimationFrame(() => {
       isDragging.value = true
-      document.body.classList.add('is-dragging')
-    })
-  }
-
-  const createDragImage = (event, element) => {
-    const rect = element.getBoundingClientRect()
-    
-    const dragImage = element.cloneNode(true)
-    dragImage.style.position = 'absolute'
-    dragImage.style.top = '-1000px'
-    dragImage.style.left = '-1000px'
-    dragImage.style.width = rect.width + 'px'
-    dragImage.style.height = rect.height + 'px'
-    dragImage.style.opacity = '0.9'
-    dragImage.style.transform = 'rotate(3deg)'
-    dragImage.style.boxShadow = '0 8px 32px rgba(0, 0, 0, 0.35)'
-    dragImage.style.borderRadius = '10px'
-    dragImage.style.pointerEvents = 'none'
-    dragImage.style.zIndex = '10000'
-    
-    document.body.appendChild(dragImage)
-
-    const offsetX = event.clientX - rect.left
-    const offsetY = event.clientY - rect.top
-    event.dataTransfer.setDragImage(dragImage, offsetX, offsetY)
-
-    // Cleanup
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        if (dragImage.parentNode) {
-          dragImage.parentNode.removeChild(dragImage)
-        }
-      }, 0)
+      document.body.style.cursor = 'grabbing'
     })
   }
 
@@ -97,7 +80,6 @@ export function useKanbanDragDrop() {
     if (dropTargetColumnId.value !== columnId || dropTargetIndex.value !== taskIndex) {
       dropTargetColumnId.value = columnId
       dropTargetIndex.value = taskIndex
-      console.log('[DRAG OVER] Target:', columnId, 'index:', taskIndex)
     }
   }
 
@@ -107,38 +89,30 @@ export function useKanbanDragDrop() {
     
     event.preventDefault()
 
-    const targetColumnId = dropTargetColumnId.value || columnId
-    let targetIndex = dropTargetIndex.value ?? 0
-    const srcColumnId = sourceColumnId.value
-    const srcIndex = sourceIndex.value
+    const targetCol = dropTargetColumnId.value || columnId
+    let targetIdx = dropTargetIndex.value ?? 0
+    const srcCol = sourceColumnId.value
+    const srcIdx = sourceIndex.value
 
-    console.log('[DROP] Task:', draggedTask.value.title)
-    console.log('[DROP] From:', srcColumnId, 'index:', srcIndex)
-    console.log('[DROP] To:', targetColumnId, 'raw index:', targetIndex)
+    console.log('[DROP]', draggedTask.value.title)
+    console.log('  From:', srcCol, 'index', srcIdx)
+    console.log('  To:', targetCol, 'index', targetIdx)
 
-    // Calculate final index
-    let finalIndex = targetIndex
-
-    if (srcColumnId === targetColumnId) {
-      // Same column move
-      if (targetIndex > srcIndex) {
-        // Moving down: subtract 1 because source will be removed first
-        finalIndex = targetIndex - 1
-      }
-      // Moving up: targetIndex is correct
+    // Adjust for same-column moves
+    if (srcCol === targetCol && targetIdx > srcIdx) {
+      targetIdx = targetIdx - 1
     }
-    // Cross-column: targetIndex is correct as-is
 
-    finalIndex = Math.max(0, finalIndex)
-    console.log('[DROP] Final index:', finalIndex)
+    const finalIdx = Math.max(0, targetIdx)
+    console.log('  Final index:', finalIdx)
 
     if (onMove) {
       onMove({
         task: draggedTask.value,
-        sourceColumnId: srcColumnId,
-        sourceColumnIndex: srcIndex,
-        targetColumnId: targetColumnId,
-        targetIndex: finalIndex
+        sourceColumnId: srcCol,
+        sourceColumnIndex: srcIdx,
+        targetColumnId: targetCol,
+        targetIndex: finalIdx
       })
     }
 
@@ -147,7 +121,7 @@ export function useKanbanDragDrop() {
 
   // ============ DRAG END ============
   const handleDragEnd = () => {
-    console.log('[DRAG] End')
+    console.log('[DRAG END]')
     resetDragState()
   }
 
@@ -159,12 +133,7 @@ export function useKanbanDragDrop() {
     sourceIndex.value = null
     dropTargetColumnId.value = null
     dropTargetIndex.value = null
-    document.body.classList.remove('is-dragging')
-  }
-
-  // ============ HELPERS ============
-  const isTaskBeingDragged = (taskId) => {
-    return isDragging.value && draggedTask.value?.id === taskId
+    document.body.style.cursor = ''
   }
 
   return {
@@ -183,8 +152,5 @@ export function useKanbanDragDrop() {
     handleDrop,
     handleDragEnd,
     resetDragState,
-
-    // Helpers
-    isTaskBeingDragged,
   }
 }
