@@ -1,10 +1,10 @@
 <template>
   <div>
     <div class="board-header">
-      <h1>📋 Kanban Board with Virtual Scroll</h1>
+      <h1>📋 Kanban Board - Linear Style</h1>
     </div>
     
-    <div class="container">
+    <div class="container" ref="boardContainer">
       <KanbanColumn
         v-for="column in columns" 
         :key="column.id"
@@ -21,90 +21,14 @@ import { ref, provide } from 'vue'
 import { useKanbanDragDrop } from '@/composables/useKanbanDragDrop'
 import KanbanColumn from './KanbanColumn.vue'
 
-const handleDragStartRemove = (columnId, taskIndex) => {
-  const sourceColumn = columns.value.find(col => col.id === columnId)
-  if (!sourceColumn) return
-
-  // 1. Temporarily remove the task from the data array.
-  sourceColumn.tasks.splice(taskIndex, 1)
-
-  // 2. Force the scroller to update its cache
-  nextTick(() => { // ✅ Use nextTick instead of requestAnimationFrame for consistency
-    columnRefs.value[columnId]?.scroller?.forceUpdate()
-  })
-}
-
-// ✅ NEW FUNCTION: Handles re-insertion when drag is cancelled/aborted
-const handleDragCancelReinsert = () => {
-    // Retrieve necessary data from the drag state
-    const task = dragDrop.draggedTask.value
-    const columnId = dragDrop.sourceColumnId.value
-    const index = dragDrop.draggedTaskIndex.value
-    
-    // Safety check
-    if (!task || !columnId || index === null) return
-
-    const sourceColumn = columns.value.find(col => col.id === columnId)
-    if (!sourceColumn) return
-
-    // Re-insert the task at its original position
-    sourceColumn.tasks.splice(index, 0, task)
-    
-    // Force update the scroller
-    nextTick(() => {
-        columnRefs.value[columnId]?.scroller?.forceUpdate()
-    })
-    console.log('[BOARD] Task re-inserted on cancel:', task.title)
-}
-
-
-// ✅ CRITICAL FIX: Initialize drag and drop by passing ALL necessary handlers
-const dragDrop = useKanbanDragDrop({
-  handleDragStartRemove: handleDragStartRemove,
-  handleDragCancelReinsert: handleDragCancelReinsert // Pass new handler
-})
+// Initialize drag and drop
+const dragDrop = useKanbanDragDrop()
 
 // Provide to child components
 provide('kanbanDragDrop', dragDrop)
 
-const handleTaskMove = async ({ task, sourceColumnId, sourceColumnIndex, targetColumnId, targetIndex }) => {
-  console.log('[BOARD] Moving task:', {
-    task: task.title,
-    from: `${sourceColumnId}[${sourceColumnIndex}]`,
-    to: `${targetColumnId}[${targetIndex}]`
-  })
-  
-  const targetColumn = columns.value.find(col => col.id === targetColumnId)
-  
-  if (!targetColumn) {
-    console.error('[BOARD] Target column not found')
-    // If the target is invalid, re-insert the task back at the source
-    dragDrop.handleDragCancelReinsert() 
-    return
-  }
-  
-  // NOTE: The task was already removed from the source array in handleDragStartRemove.
-  // We only need to insert it into the target column here.
-  
-  // Create a new array to ensure reactivity update
-  const targetNewTasks = [...targetColumn.tasks]
-  
-  // Insert the task at the calculated target index
-  const clampedIndex = Math.max(0, Math.min(targetIndex, targetNewTasks.length))
-  targetNewTasks.splice(clampedIndex, 0, task) 
-  
-  targetColumn.tasks = targetNewTasks
-  
-  // Force update the scroller(s)
-  await nextTick()
-  const sourceRef = columnRefs.value[sourceColumnId] 
-  const targetRef = columnRefs.value[targetColumnId]
-  
-  if (sourceRef && sourceRef.forceUpdate) sourceRef.forceUpdate()
-  if (targetRef && targetRef.forceUpdate) targetRef.forceUpdate()
-  
-  console.log('[BOARD] Task moved successfully')
-}
+// Board container ref (for auto-scroll if needed)
+const boardContainer = ref(null)
 
 // Track column refs
 const columnRefs = ref({})
@@ -115,7 +39,7 @@ const setColumnRef = (columnId, el) => {
   }
 }
 
-// Sample data
+// Sample data - 100+ tasks per column like Linear
 const columns = ref([
   {
     id: 'todo',
@@ -158,6 +82,50 @@ const columns = ref([
     }))
   }
 ])
+
+// Handle task movement
+const handleTaskMove = ({ task, sourceColumnId, sourceColumnIndex, targetColumnId, targetIndex }) => {
+  console.log('[BOARD] Moving task:', {
+    task: task.title,
+    from: `${sourceColumnId}[${sourceColumnIndex}]`,
+    to: `${targetColumnId}[${targetIndex}]`
+  })
+  
+  const sourceColumn = columns.value.find(col => col.id === sourceColumnId)
+  const targetColumn = columns.value.find(col => col.id === targetColumnId)
+  
+  if (!sourceColumn || !targetColumn) {
+    console.error('[BOARD] Column not found')
+    return
+  }
+  
+  if (sourceColumnId === targetColumnId) {
+    // Same column move
+    const newTasks = [...sourceColumn.tasks]
+    const [movedTask] = newTasks.splice(sourceColumnIndex, 1)
+    
+    // targetIndex is already in the filtered list context
+    // so we can insert directly
+    const clampedIndex = Math.max(0, Math.min(targetIndex, newTasks.length))
+    newTasks.splice(clampedIndex, 0, movedTask)
+    sourceColumn.tasks = newTasks
+    
+    console.log('[BOARD] Same column move complete. New order:', newTasks.slice(0, 5).map(t => t.title))
+  } else {
+    // Cross-column move
+    const sourceNewTasks = [...sourceColumn.tasks]
+    const [movedTask] = sourceNewTasks.splice(sourceColumnIndex, 1)
+    
+    const targetNewTasks = [...targetColumn.tasks]
+    const clampedIndex = Math.max(0, Math.min(targetIndex, targetNewTasks.length))
+    targetNewTasks.splice(clampedIndex, 0, movedTask)
+    
+    sourceColumn.tasks = sourceNewTasks
+    targetColumn.tasks = targetNewTasks
+    
+    console.log('[BOARD] Cross-column move complete')
+  }
+}
 </script>
 
 <style scoped>
@@ -203,6 +171,16 @@ const columns = ref([
 
 .container::-webkit-scrollbar-thumb:hover {
   background: #64748b;
+}
+
+/* Global dragging styles */
+:global(.is-dragging) {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+:global(.is-dragging *) {
+  cursor: grabbing !important;
 }
 
 @media (max-width: 768px) {

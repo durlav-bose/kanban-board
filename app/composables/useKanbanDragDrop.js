@@ -1,218 +1,169 @@
-import { ref, nextTick } from 'vue'
+import { ref } from 'vue'
 
-export const useKanbanDragDrop = (options) => {
-  // Drag state
+/**
+ * Kanban Drag & Drop - Linear Style
+ * 
+ * Key principles:
+ * - Don't filter the list (causes RecycleScroller re-render which cancels drag)
+ * - Hide dragged task with CSS opacity
+ * - Use placeholder space that pushes other tasks down
+ * - Delay isDragging to allow native drag to initialize
+ */
+export function useKanbanDragDrop() {
+  // ============ DRAG STATE ============
+  const isDragging = ref(false)
   const draggedTask = ref(null)
   const sourceColumnId = ref(null)
-  const draggedTaskIndex = ref(null)
-  const isDragging = ref(false)
+  const sourceIndex = ref(null)
+  const placeholderHeight = ref(88)
 
-  // const isTaskVisible = ref(true)
-
-  const handleDragStartRemove = options.handleDragStartRemove
-  const handleDragCancelReinsert = options.handleDragCancelReinsert
-  
-  // Drop target state
+  // Drop target tracking
   const dropTargetColumnId = ref(null)
   const dropTargetIndex = ref(null)
-  
-  // Placeholder dimensions
-  const placeholderHeight = ref(0)
 
-  // ✅ SIMPLE START - No delays, no timers
-  const handleDragStart = (event, task, columnId, taskIndex, element) => {
-    console.log('[DRAG START]', { task: task.title, columnId, taskIndex })
-    
-    // Set state IMMEDIATELY
-    draggedTask.value = task
+  // ============ DRAG START ============
+  const handleDragStart = (event, task, columnId, index, element) => {
+    console.log('[DRAG] Start:', task.title, 'from', columnId, 'at index', index)
+
+    // Set data BEFORE isDragging (prevents CSS from canceling drag)
+    draggedTask.value = { ...task }
     sourceColumnId.value = columnId
-    draggedTaskIndex.value = taskIndex
-    placeholderHeight.value = element?.offsetHeight || 100
-    
-    // Set transfer data
+    sourceIndex.value = index
+
+    // Capture height
+    if (element) {
+      placeholderHeight.value = element.getBoundingClientRect().height
+    }
+
+    // Initialize drop target
+    dropTargetColumnId.value = columnId
+    dropTargetIndex.value = index
+
+    // Set drag data
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData('text/plain', task.id)
-    
-    // Create drag image
-    const dragImage = element.cloneNode(true)
-    dragImage.style.position = 'absolute'
-    dragImage.style.top = '-9999px'
-    dragImage.style.left = '-9999px'
-    dragImage.style.width = `${element.offsetWidth}px`
-    dragImage.style.opacity = '0.95'
-    dragImage.style.transform = 'rotate(2deg) scale(1.03)'
-    dragImage.style.border = '2px solid #6366f1'
-    dragImage.style.boxShadow = '0 20px 40px rgba(99, 102, 241, 0.6)'
-    dragImage.style.borderRadius = '10px'
-    document.body.appendChild(dragImage)
-    
-    event.dataTransfer.setDragImage(
-      dragImage,
-      element.offsetWidth / 2,
-      element.offsetHeight / 2
-    )
-    
-    setTimeout(() => {
-      if (document.body.contains(dragImage)) {
-        document.body.removeChild(dragImage)
-      }
-    }, 0)
-    
-    // 1. Set isDragging immediately (or in requestAnimationFrame/setTimeout(0))
-    // This allows the column/placeholder logic to start.
+
+    // Custom drag image
+    if (element) {
+      createDragImage(event, element)
+    }
+
+    // CRITICAL: Delay isDragging to let drag event fully initialize
     requestAnimationFrame(() => {
       isDragging.value = true
-      dropTargetColumnId.value = columnId
-      dropTargetIndex.value = taskIndex
+      document.body.classList.add('is-dragging')
     })
-    
-    if (handleDragStartRemove) {
-            // Wait for one frame to ensure isDragging is set and drag image is captured
-            setTimeout(() => {
-                 handleDragStartRemove(columnId, taskIndex)
-            }, 50) // or 10ms if 0 is still flaky
-        }
   }
 
-  // ✅ SIMPLE DRAG OVER - Just update position
+  const createDragImage = (event, element) => {
+    const rect = element.getBoundingClientRect()
+    
+    const dragImage = element.cloneNode(true)
+    dragImage.style.position = 'absolute'
+    dragImage.style.top = '-1000px'
+    dragImage.style.left = '-1000px'
+    dragImage.style.width = rect.width + 'px'
+    dragImage.style.height = rect.height + 'px'
+    dragImage.style.opacity = '0.9'
+    dragImage.style.transform = 'rotate(3deg)'
+    dragImage.style.boxShadow = '0 8px 32px rgba(0, 0, 0, 0.35)'
+    dragImage.style.borderRadius = '10px'
+    dragImage.style.pointerEvents = 'none'
+    dragImage.style.zIndex = '10000'
+    
+    document.body.appendChild(dragImage)
+
+    const offsetX = event.clientX - rect.left
+    const offsetY = event.clientY - rect.top
+    event.dataTransfer.setDragImage(dragImage, offsetX, offsetY)
+
+    // Cleanup
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        if (dragImage.parentNode) {
+          dragImage.parentNode.removeChild(dragImage)
+        }
+      }, 0)
+    })
+  }
+
+  // ============ DRAG OVER ============
   const handleDragOver = (event, columnId, taskIndex) => {
     if (!isDragging.value) return
     
     event.preventDefault()
-    event.stopPropagation()
     event.dataTransfer.dropEffect = 'move'
-    
-    const target = event.target.closest('[data-task-index]')
-    if (!target) return
-    
-    const rect = target.getBoundingClientRect()
-    const midPoint = rect.top + rect.height / 2
-    const mouseY = event.clientY
-    
-    // Simple: above midpoint = before, below = after
-    const newIndex = mouseY < midPoint ? taskIndex : taskIndex + 1
-    
-    dropTargetColumnId.value = columnId
-    dropTargetIndex.value = newIndex
-  }
 
-  const handleEmptyColumnDragOver = (event, columnId) => {
-    if (!isDragging.value) return
-    
-    event.preventDefault()
-    event.dataTransfer.dropEffect = 'move'
-    
-    dropTargetColumnId.value = columnId
-    dropTargetIndex.value = 0
-  }
-
-  const handleColumnDragOver = (event, columnId, taskCount) => {
-    if (!isDragging.value) return
-    
-    event.preventDefault()
-    event.dataTransfer.dropEffect = 'move'
-    
-    dropTargetColumnId.value = columnId
-    if (dropTargetIndex.value === null) {
-      dropTargetIndex.value = taskCount
+    if (dropTargetColumnId.value !== columnId || dropTargetIndex.value !== taskIndex) {
+      dropTargetColumnId.value = columnId
+      dropTargetIndex.value = taskIndex
+      console.log('[DRAG OVER] Target:', columnId, 'index:', taskIndex)
     }
   }
 
-  // ✅ SIMPLE DROP - Execute and reset immediately
-  const handleDrop = (event, columnId, onTaskMove) => {
+  // ============ DROP ============
+  const handleDrop = (event, columnId, onMove) => {
+    if (!isDragging.value || !draggedTask.value) return
+    
     event.preventDefault()
-    event.stopPropagation()
-    
-    console.log('[DROP]', { 
-      task: draggedTask.value?.title,
-      from: `${sourceColumnId.value}[${draggedTaskIndex.value}]`,
-      to: `${dropTargetColumnId.value}[${dropTargetIndex.value}]`
-    })
-    
-    if (!draggedTask.value || !isDragging.value) {
-      console.warn('[DROP] Invalid state, resetting')
-      resetDragState()
-      return
-    }
-    
+
     const targetColumnId = dropTargetColumnId.value || columnId
-    let targetIndex = dropTargetIndex.value ?? 999
-    
-    const taskToMove = { ...draggedTask.value }
-    const sourceCol = sourceColumnId.value
-    const sourceIdx = draggedTaskIndex.value
-    
-    // Adjust index for same column moves
-    // if (sourceCol === targetColumnId && targetIndex > sourceIdx) {
-    //   targetIndex = targetIndex - 1
-    // }
-    
-    // Execute move callback
-    if (onTaskMove) {
-      onTaskMove({
-        task: taskToMove,
-        sourceColumnId: sourceCol,
-        sourceColumnIndex: sourceIdx,
-        targetColumnId,
-        targetIndex // This index is now correct for the shortened array
+    let targetIndex = dropTargetIndex.value ?? 0
+    const srcColumnId = sourceColumnId.value
+    const srcIndex = sourceIndex.value
+
+    console.log('[DROP] Task:', draggedTask.value.title)
+    console.log('[DROP] From:', srcColumnId, 'index:', srcIndex)
+    console.log('[DROP] To:', targetColumnId, 'raw index:', targetIndex)
+
+    // Calculate final index
+    let finalIndex = targetIndex
+
+    if (srcColumnId === targetColumnId) {
+      // Same column move
+      if (targetIndex > srcIndex) {
+        // Moving down: subtract 1 because source will be removed first
+        finalIndex = targetIndex - 1
+      }
+      // Moving up: targetIndex is correct
+    }
+    // Cross-column: targetIndex is correct as-is
+
+    finalIndex = Math.max(0, finalIndex)
+    console.log('[DROP] Final index:', finalIndex)
+
+    if (onMove) {
+      onMove({
+        task: draggedTask.value,
+        sourceColumnId: srcColumnId,
+        sourceColumnIndex: srcIndex,
+        targetColumnId: targetColumnId,
+        targetIndex: finalIndex
       })
     }
-    
+
     resetDragState()
   }
 
+  // ============ DRAG END ============
   const handleDragEnd = () => {
-    console.log('[DRAG END]')
-    
-    // CRITICAL: Small delay to let drop fire first if it's going to
-    requestAnimationFrame(() => {
-      if (isDragging.value) {
-        // This runs if drop() did NOT fire before dragend (i.e., drag cancelled)
-        console.log('[DRAG END] Resetting (drag cancelled)')
-        
-        // ✅ Call re-insertion logic before resetting state
-        if (handleDragCancelReinsert) {
-            handleDragCancelReinsert()
-        }
-        
-        resetDragState()
-      }
-    })
+    console.log('[DRAG] End')
+    resetDragState()
   }
 
-  // ✅ SIMPLE RESET - Clear everything
+  // ============ RESET ============
   const resetDragState = () => {
-    console.log('[RESET] Clearing state')
-    
     isDragging.value = false
     draggedTask.value = null
     sourceColumnId.value = null
-    draggedTaskIndex.value = null
+    sourceIndex.value = null
     dropTargetColumnId.value = null
     dropTargetIndex.value = null
+    document.body.classList.remove('is-dragging')
   }
 
-  // Placeholder helpers
-  const shouldShowPlaceholderBefore = (columnId, taskIndex) => {
-    return isDragging.value && 
-           dropTargetColumnId.value === columnId && 
-           dropTargetIndex.value === taskIndex
-  }
-
-  const shouldShowPlaceholderAfter = (columnId, taskIndex, isLast) => {
-    return isDragging.value && 
-           isLast && 
-           dropTargetColumnId.value === columnId && 
-           dropTargetIndex.value > taskIndex
-  }
-
-  const shouldShowEmptyPlaceholder = (columnId, isEmpty) => {
-    return isDragging.value && 
-           isEmpty && 
-           dropTargetColumnId.value === columnId
-  }
-
-  const isTaskDragging = (taskId) => {
+  // ============ HELPERS ============
+  const isTaskBeingDragged = (taskId) => {
     return isDragging.value && draggedTask.value?.id === taskId
   }
 
@@ -221,24 +172,19 @@ export const useKanbanDragDrop = (options) => {
     isDragging,
     draggedTask,
     sourceColumnId,
+    sourceIndex,
     dropTargetColumnId,
     dropTargetIndex,
     placeholderHeight,
-    draggedTaskIndex,
-    
-    // Handlers
+
+    // Methods
     handleDragStart,
     handleDragOver,
-    handleEmptyColumnDragOver,
-    handleColumnDragOver,
     handleDrop,
     handleDragEnd,
     resetDragState,
-    
+
     // Helpers
-    shouldShowPlaceholderBefore,
-    shouldShowPlaceholderAfter,
-    shouldShowEmptyPlaceholder,
-    isTaskDragging,
+    isTaskBeingDragged,
   }
 }
