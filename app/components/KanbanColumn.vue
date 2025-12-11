@@ -139,18 +139,42 @@ const placeholderInfo = computed(() => {
 const showPlaceholder = computed(() => placeholderInfo.value !== null);
 
 // Calculate placeholder Y position
+// const placeholderStyle = computed(() => {
+//   if (!placeholderInfo.value) return { display: 'none' };
+  
+//   const { dropIndex, isSameColumn, sourceIndex } = placeholderInfo.value;
+  
+//   // Get scroll position
+//   const scrollTop = scrollerRef.value?.$el?.scrollTop || 0;
+  
+//   // Calculate visual index for positioning
+//   let visualIndex = dropIndex;
+//   if (isSameColumn && dropIndex > sourceIndex) {
+//     // Account for the hidden source task
+//     visualIndex = dropIndex - 1;
+//   }
+  
+//   // Position based on item size
+//   const top = (visualIndex * ITEM_SIZE) - scrollTop;
+  
+//   return {
+//     top: `${top}px`,
+//     height: `${PLACEHOLDER_HEIGHT}px`,
+//   };
+// });
+
 const placeholderStyle = computed(() => {
   if (!placeholderInfo.value) return { display: 'none' };
   
   const { dropIndex, isSameColumn, sourceIndex } = placeholderInfo.value;
   
-  // Get scroll position
-  const scrollTop = scrollerRef.value?.$el?.scrollTop || 0;
+  // Get scroll position - FIXED
+  const scroller = scrollerRef.value?.$el?.querySelector('.vue-recycle-scroller__item-wrapper')?.parentElement;
+  const scrollTop = scroller?.scrollTop || 0;
   
   // Calculate visual index for positioning
   let visualIndex = dropIndex;
   if (isSameColumn && dropIndex > sourceIndex) {
-    // Account for the hidden source task
     visualIndex = dropIndex - 1;
   }
   

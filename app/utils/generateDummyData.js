@@ -25,15 +25,25 @@ const priorities = ['Low', 'Medium', 'High', 'Critical'];
 
 const descriptions = [
   'This task requires careful attention to detail.',
-  'High priority item that needs immediate action.',
+  'High priority item that needs immediate action. Please review the requirements document before starting work on this.',
   'Can be completed in the next sprint.',
-  'Blocked by external dependencies.',
+  'Blocked by external dependencies. Waiting for API documentation from the third-party service provider. Expected delivery next week.',
   'Waiting for stakeholder approval.',
-  'Technical debt that should be addressed.',
+  'Technical debt that should be addressed. This has been pending for several months and is affecting our ability to ship new features quickly. We need to refactor the entire authentication module to use JWT tokens instead of session-based auth.',
   'New feature requested by customers.',
-  'Bug fix required for production.',
+  'Bug fix required for production. This is affecting multiple users and needs to be deployed ASAP.',
   'Performance optimization needed.',
-  'Security vulnerability to patch.'
+  'Security vulnerability to patch. CVE identified in dependency. Update required before next release cycle.',
+  'Quick fix - should take less than an hour.',
+  'Complex implementation requiring multiple team members. We need to coordinate with the backend team for API changes, frontend team for UI updates, and QA team for comprehensive testing across all supported browsers and devices.',
+  'Simple update to configuration.',
+  'Major refactoring effort spanning multiple components and services. This will touch the data layer, business logic, and presentation layer. Estimated 2-3 weeks of work with thorough testing required.',
+  'Minor CSS adjustment.',
+  'Comprehensive testing required including unit tests, integration tests, and end-to-end tests. Need to ensure backwards compatibility with existing API consumers.',
+  'Update documentation only.',
+  'This task involves coordinating with external stakeholders, updating multiple microservices, implementing new database migrations, updating API contracts, and ensuring zero-downtime deployment.',
+  'Add new endpoint.',
+  'Critical bug affecting production users. Reports coming in from customer support. Need immediate investigation and hotfix deployment.'
 ];
 
 const tags = [
