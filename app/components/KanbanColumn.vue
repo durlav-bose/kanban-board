@@ -185,55 +185,53 @@ const placeholderStyle = computed(() => {
   
   const { dropIndex, isSameColumn, sourceIndex } = placeholderInfo.value;
   
-  // Get the scroller element
-  const scroller = scrollerRef.value?.$el?.querySelector('.vue-recycle-scroller__item-wrapper')?.parentElement;
-  const scrollTop = scroller?.scrollTop || 0;
-  
   // Get all rendered task wrapper elements
   const taskWrappers = tasksContainerRef.value?.querySelectorAll('.task-wrapper') || [];
   
-  // Calculate cumulative height up to dropIndex
-  let cumulativeHeight = 0;
-  let placeholderHeight = MIN_ITEM_SIZE; // Default placeholder height
-  
-  // Get the dragged task's height
+  // Get placeholder height
+  let placeholderHeight = MIN_ITEM_SIZE;
   if (isSameColumn) {
-    // For same column: find the actual DOM element
     const draggedTaskElement = Array.from(taskWrappers).find(wrapper => {
       const index = parseInt(wrapper.dataset.taskIndex);
       return index === sourceIndex;
     });
-    
     if (draggedTaskElement) {
       placeholderHeight = draggedTaskElement.offsetHeight;
     }
   } else {
-    // For cross-column: use the stored height from dragDrop
     placeholderHeight = dragDrop.placeholderHeight.value || MIN_ITEM_SIZE;
   }
   
-  // Sum up heights of all tasks before the drop position
-  // Important: Account for tasks that are shifted (moving up to fill gaps)
+  // Calculate cumulative position by summing heights
+  let cumulativeTop = 0;
+  let foundPosition = false;
+  
+  // Sum heights from index 0 to dropIndex
   for (let i = 0; i < dropIndex; i++) {
-    const wrapper = Array.from(taskWrappers).find(w => parseInt(w.dataset.taskIndex) === i);
+    const wrapper = Array.from(taskWrappers).find(w => 
+      parseInt(w.dataset.taskIndex) === i
+    );
+    
     if (wrapper) {
-      cumulativeHeight += wrapper.offsetHeight;
+      cumulativeTop += wrapper.offsetHeight;
     } else {
-      // Fallback to min size if element not rendered
-      cumulativeHeight += MIN_ITEM_SIZE;
+      // Element not rendered, use min size
+      cumulativeTop += MIN_ITEM_SIZE;
     }
   }
   
-  // If moving down in same column, we need to subtract the source task height
-  // because tasks between source and drop are shifting up
-  if (isSameColumn && dropIndex > sourceIndex) {
-    cumulativeHeight -= placeholderHeight;
+  // Adjust for same-column moves
+  if (isSameColumn) {
+    if (dropIndex > sourceIndex) {
+      // Moving down: source task is before drop, so we counted it
+      // But it's invisible, so subtract its height to get the visual position
+      cumulativeTop -= placeholderHeight;
+    }
+    // Moving up: source is after drop, we didn't count it, position is correct
   }
   
-  const top = cumulativeHeight - scrollTop;
-  
   return {
-    top: `${top}px`,
+    top: `${cumulativeTop}px`,
     height: `${placeholderHeight}px`,
   };
 });
@@ -258,7 +256,6 @@ const getShiftDirection = (index) => {
       // No placeholder in this column, but we're the source column
       // All tasks after source should shift UP to fill the gap
       if (index > sourceIdx) {
-        console.log(`[SHIFT] ${thisCol}[${index}]: UP (fill source gap, no placeholder)`);
         return 'up';
       }
       return null;
@@ -274,14 +271,12 @@ const getShiftDirection = (index) => {
     if (dropIndex < sourceIdx) {
       // Moving UP: tasks between drop and source shift DOWN
       if (index >= dropIndex && index < sourceIdx) {
-        console.log(`[SHIFT] ${thisCol}[${index}]: DOWN (make space, moving up)`);
         return 'down';
       }
       return null;
     } else if (dropIndex > sourceIdx) {
       // Moving DOWN: tasks between source and drop shift UP
       if (index > sourceIdx && index < dropIndex) {
-        console.log(`[SHIFT] ${thisCol}[${index}]: UP (fill gap, moving down)`);
         return 'up';
       }
       return null;
@@ -295,7 +290,6 @@ const getShiftDirection = (index) => {
     const { dropIndex } = placeholderInfo.value;
     // Tasks at and after drop index shift DOWN to make space
     if (index >= dropIndex) {
-      console.log(`[SHIFT] ${thisCol}[${index}]: DOWN (make space in target)`);
       return 'down';
     }
   }
@@ -331,11 +325,9 @@ const getShiftStyle = (index) => {
       return wrapperIndex === sourceIdx;
     });
     shiftAmount = draggedTaskElement?.offsetHeight || MIN_ITEM_SIZE;
-    console.log(`[SHIFT AMOUNT] Source column ${thisCol}: ${shiftAmount}px (measured from DOM)`);
   } else {
     // This is NOT the source column (target column): use stored height
     shiftAmount = dragDrop.placeholderHeight.value || MIN_ITEM_SIZE;
-    console.log(`[SHIFT AMOUNT] Target column ${thisCol}: ${shiftAmount}px (from dragDrop)`);
   }
   
   if (direction === 'up') {
