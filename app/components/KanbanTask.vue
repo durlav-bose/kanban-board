@@ -17,15 +17,13 @@
         </span>
       </div>
       <p v-if="task.description" class="task-description">
-        {{ truncatedDescription }}
+        {{ task.description }}
       </p>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
-
 const props = defineProps({
   task: {
     type: Object,
@@ -34,20 +32,13 @@ const props = defineProps({
 })
 
 defineEmits(['dragstart', 'dragend'])
-
-// Truncate description to keep consistent height
-const truncatedDescription = computed(() => {
-  if (!props.task.description) return ''
-  return props.task.description.length > 50 
-    ? props.task.description.slice(0, 50) + '...'
-    : props.task.description
-})
 </script>
 
 <style scoped>
 .task {
-  /* Fixed height to match RecycleScroller item-size (88px - 8px padding = 80px) */
-  height: 80px;
+  /* Allow dynamic height based on content */
+  min-height: 80px;
+  height: auto;
   box-sizing: border-box;
   background: linear-gradient(135deg, #334155 0%, #1e293b 100%);
   border: 1px solid #475569;
@@ -58,7 +49,6 @@ const truncatedDescription = computed(() => {
   user-select: none;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
   transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
 }
 
@@ -79,7 +69,6 @@ const truncatedDescription = computed(() => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
 }
 
 .task-header {
@@ -96,9 +85,7 @@ const truncatedDescription = computed(() => {
   font-size: 0.9rem;
   line-height: 1.3;
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-wrap: break-word;
 }
 
 .task-priority {
@@ -130,12 +117,11 @@ const truncatedDescription = computed(() => {
 }
 
 .task-description {
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   color: #94a3b8;
-  line-height: 1.3;
+  line-height: 1.5;
   margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: pre-wrap;
+  word-wrap: break-word;
 }
 </style>

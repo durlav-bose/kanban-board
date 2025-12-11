@@ -21,34 +21,46 @@
         <div class="placeholder-inner"></div>
       </div>
       
-      <!-- Using RecycleScroller with fixed item size -->
-      <RecycleScroller
+      <!-- Using DynamicScroller for variable height items -->
+      <DynamicScroller
         ref="scrollerRef"
         class="tasks-scroller"
         :items="column.tasks"
-        :item-size="88"
+        :min-item-size="MIN_ITEM_SIZE"
         key-field="id"
         :buffer="200"
       >
-        <template #default="{ item, index }">
-          <div 
-            class="task-wrapper"
-            :class="{ 
-              'is-dragging-source': isSourceTask(item.id, index),
-              [getShiftClass(index)]: true
-            }"
-            :data-task-index="index"
-            :data-task-id="item.id"
-            @dragover.prevent.stop="handleTaskDragOver($event, index)"
+        <template #default="{ item, index, active }">
+          <DynamicScrollerItem
+            :item="item"
+            :active="active"
+            :size-dependencies="[
+              item.title,
+              item.description,
+              item.priority
+            ]"
+            :data-index="index"
           >
-            <KanbanTask
-              :task="item"
-              @dragstart="handleTaskDragStart($event, item, index)"
-              @dragend="handleTaskDragEnd"
-            />
-          </div>
+            <div 
+              class="task-wrapper"
+              :class="{ 
+                'is-dragging-source': isSourceTask(item.id, index),
+                [getShiftClass(index)]: true
+              }"
+              :style="getShiftStyle(index)"
+              :data-task-index="index"
+              :data-task-id="item.id"
+              @dragover.prevent.stop="handleTaskDragOver($event, index)"
+            >
+              <KanbanTask
+                :task="item"
+                @dragstart="handleTaskDragStart($event, item, index)"
+                @dragend="handleTaskDragEnd"
+              />
+            </div>
+          </DynamicScrollerItem>
         </template>
-      </RecycleScroller>
+      </DynamicScroller>
     </div>
     
     <!-- Empty column state -->
@@ -73,12 +85,12 @@
 
 <script setup>
 import { ref, inject, computed, onMounted, onUnmounted } from "vue";
-import { RecycleScroller } from "vue-virtual-scroller";
+import { DynamicScroller, DynamicScrollerItem } from "vue-virtual-scroller";
 import "vue-virtual-scroller/dist/vue-virtual-scroller.css";
 import KanbanTask from "./KanbanTask.vue";
 
-// Constants - must match item-size in RecycleScroller
-const ITEM_SIZE = 88;
+// Constants for dynamic scroller
+const MIN_ITEM_SIZE = 80;
 const PLACEHOLDER_HEIGHT = 80;
 
 const props = defineProps({
@@ -111,6 +123,11 @@ const isSourceTask = (taskId, index) => {
     dragDrop.draggedTask.value.id === taskId
   );
 };
+
+// Is this the SOURCE column (where drag started)?
+const isSourceColumn = computed(() => {
+  return dragDrop.isDragging.value && dragDrop.sourceColumnId.value === props.column.id;
+});
 
 // ============ PLACEHOLDER LOGIC ============
 
@@ -168,68 +185,168 @@ const placeholderStyle = computed(() => {
   
   const { dropIndex, isSameColumn, sourceIndex } = placeholderInfo.value;
   
-  // Get scroll position - FIXED
+  // Get the scroller element
   const scroller = scrollerRef.value?.$el?.querySelector('.vue-recycle-scroller__item-wrapper')?.parentElement;
   const scrollTop = scroller?.scrollTop || 0;
   
-  // Calculate visual index for positioning
-  let visualIndex = dropIndex;
-  if (isSameColumn && dropIndex > sourceIndex) {
-    visualIndex = dropIndex - 1;
+  // Get all rendered task wrapper elements
+  const taskWrappers = tasksContainerRef.value?.querySelectorAll('.task-wrapper') || [];
+  
+  // Calculate cumulative height up to dropIndex
+  let cumulativeHeight = 0;
+  let placeholderHeight = MIN_ITEM_SIZE; // Default placeholder height
+  
+  // Get the dragged task's height
+  if (isSameColumn) {
+    // For same column: find the actual DOM element
+    const draggedTaskElement = Array.from(taskWrappers).find(wrapper => {
+      const index = parseInt(wrapper.dataset.taskIndex);
+      return index === sourceIndex;
+    });
+    
+    if (draggedTaskElement) {
+      placeholderHeight = draggedTaskElement.offsetHeight;
+    }
+  } else {
+    // For cross-column: use the stored height from dragDrop
+    placeholderHeight = dragDrop.placeholderHeight.value || MIN_ITEM_SIZE;
   }
   
-  // Position based on item size
-  const top = (visualIndex * ITEM_SIZE) - scrollTop;
+  // Sum up heights of all tasks before the drop position
+  // Important: Account for tasks that are shifted (moving up to fill gaps)
+  for (let i = 0; i < dropIndex; i++) {
+    const wrapper = Array.from(taskWrappers).find(w => parseInt(w.dataset.taskIndex) === i);
+    if (wrapper) {
+      cumulativeHeight += wrapper.offsetHeight;
+    } else {
+      // Fallback to min size if element not rendered
+      cumulativeHeight += MIN_ITEM_SIZE;
+    }
+  }
+  
+  // If moving down in same column, we need to subtract the source task height
+  // because tasks between source and drop are shifting up
+  if (isSameColumn && dropIndex > sourceIndex) {
+    cumulativeHeight -= placeholderHeight;
+  }
+  
+  const top = cumulativeHeight - scrollTop;
   
   return {
     top: `${top}px`,
-    height: `${PLACEHOLDER_HEIGHT}px`,
+    height: `${placeholderHeight}px`,
   };
 });
 
 // ============ SHIFT LOGIC ============
 
 /**
- * Determine which tasks should shift.
- * When moving up: tasks between drop and source shift down
- * When moving down: tasks between source and drop shift up
+ * Determine which tasks should shift and in which direction.
+ * Returns: 'up' | 'down' | null
  */
-const shouldShiftDown = (index) => {
-  if (!placeholderInfo.value) return false;
+const getShiftDirection = (index) => {
+  if (!dragDrop.isDragging.value) return null;
   
-  const { dropIndex, isSameColumn, sourceIndex } = placeholderInfo.value;
+  const sourceCol = dragDrop.sourceColumnId.value;
+  const sourceIdx = dragDrop.sourceIndex.value;
+  const targetCol = dragDrop.dropTargetColumnId.value;
+  const thisCol = props.column.id;
   
-  // Don't shift the source task
-  if (isSameColumn && index === sourceIndex) return false;
-  
-  if (isSameColumn) {
-    if (dropIndex < sourceIndex) {
-      // Moving UP: shift tasks DOWN from dropIndex to just before source
-      return index >= dropIndex && index < sourceIndex;
-    } else {
-      // Moving DOWN: shift tasks UP from after source to just before drop
-      // We use negative transform to move them up
-      return index > sourceIndex && index < dropIndex;
+  // Handle SOURCE column
+  if (thisCol === sourceCol) {
+    if (!placeholderInfo.value) {
+      // No placeholder in this column, but we're the source column
+      // All tasks after source should shift UP to fill the gap
+      if (index > sourceIdx) {
+        console.log(`[SHIFT] ${thisCol}[${index}]: UP (fill source gap, no placeholder)`);
+        return 'up';
+      }
+      return null;
     }
-  } else {
-    // Cross-column: shift tasks at and after drop index DOWN
-    return index >= dropIndex;
+    
+    // Same column drag with placeholder
+    const { dropIndex, isSameColumn } = placeholderInfo.value;
+    
+    if (index === sourceIdx) {
+      return null; // Source task stays invisible
+    }
+    
+    if (dropIndex < sourceIdx) {
+      // Moving UP: tasks between drop and source shift DOWN
+      if (index >= dropIndex && index < sourceIdx) {
+        console.log(`[SHIFT] ${thisCol}[${index}]: DOWN (make space, moving up)`);
+        return 'down';
+      }
+      return null;
+    } else if (dropIndex > sourceIdx) {
+      // Moving DOWN: tasks between source and drop shift UP
+      if (index > sourceIdx && index < dropIndex) {
+        console.log(`[SHIFT] ${thisCol}[${index}]: UP (fill gap, moving down)`);
+        return 'up';
+      }
+      return null;
+    }
+    
+    return null;
   }
+  
+  // Handle TARGET column (different from source)
+  if (thisCol === targetCol && placeholderInfo.value) {
+    const { dropIndex } = placeholderInfo.value;
+    // Tasks at and after drop index shift DOWN to make space
+    if (index >= dropIndex) {
+      console.log(`[SHIFT] ${thisCol}[${index}]: DOWN (make space in target)`);
+      return 'down';
+    }
+  }
+  
+  return null;
 };
 
-// Calculate the shift direction
+// Calculate the shift class based on direction
 const getShiftClass = (index) => {
-  if (!shouldShiftDown(index)) return '';
+  const direction = getShiftDirection(index);
+  if (direction === 'down') return 'is-shifted';
+  if (direction === 'up') return 'is-shifted-up';
+  return '';
+};
+
+// Get inline shift style with dynamic height
+const getShiftStyle = (index) => {
+  const direction = getShiftDirection(index);
+  if (!direction) return {};
   
-  const { dropIndex, isSameColumn, sourceIndex } = placeholderInfo.value;
+  const sourceCol = dragDrop.sourceColumnId.value;
+  const sourceIdx = dragDrop.sourceIndex.value;
+  const thisCol = props.column.id;
   
-  if (isSameColumn && dropIndex > sourceIndex) {
-    // Moving down: shift UP
-    return 'is-shifted-up';
+  // Get the dragged task element to measure its height
+  const taskWrappers = tasksContainerRef.value?.querySelectorAll('.task-wrapper') || [];
+  let shiftAmount = MIN_ITEM_SIZE;
+  
+  if (thisCol === sourceCol) {
+    // This IS the source column: measure the actual source task
+    const draggedTaskElement = Array.from(taskWrappers).find(wrapper => {
+      const wrapperIndex = parseInt(wrapper.dataset.taskIndex);
+      return wrapperIndex === sourceIdx;
+    });
+    shiftAmount = draggedTaskElement?.offsetHeight || MIN_ITEM_SIZE;
+    console.log(`[SHIFT AMOUNT] Source column ${thisCol}: ${shiftAmount}px (measured from DOM)`);
+  } else {
+    // This is NOT the source column (target column): use stored height
+    shiftAmount = dragDrop.placeholderHeight.value || MIN_ITEM_SIZE;
+    console.log(`[SHIFT AMOUNT] Target column ${thisCol}: ${shiftAmount}px (from dragDrop)`);
   }
   
-  // Moving up or cross-column: shift DOWN
-  return 'is-shifted';
+  if (direction === 'up') {
+    // Shift UP to fill gap
+    return { transform: `translateY(-${shiftAmount}px)` };
+  } else if (direction === 'down') {
+    // Shift DOWN to make space
+    return { transform: `translateY(${shiftAmount}px)` };
+  }
+  
+  return {};
 };
 
 // ============ EVENT HANDLERS ============
@@ -420,6 +537,8 @@ defineExpose({
 .task-wrapper {
   padding: 4px 6px;
   transition: transform 200ms cubic-bezier(0.2, 0, 0, 1), opacity 150ms ease;
+  will-change: transform;
+  position: relative;
 }
 
 /* Source task - invisible */
@@ -428,15 +547,7 @@ defineExpose({
   pointer-events: none;
 }
 
-/* Shifted tasks move down */
-.task-wrapper.is-shifted {
-  transform: translateY(80px);
-}
-
-/* Shifted tasks move up when dragging down */
-.task-wrapper.is-shifted-up {
-  transform: translateY(-88px);
-}
+/* Shifted tasks - transforms applied via inline styles for dynamic heights */
 
 /* Floating placeholder */
 .floating-placeholder {

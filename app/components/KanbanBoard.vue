@@ -19,6 +19,7 @@
 <script setup>
 import { ref, provide } from 'vue'
 import { useKanbanDragDrop } from '@/composables/useKanbanDragDrop'
+import { generateDummyData } from '@/utils/generateDummyData'
 import KanbanColumn from './KanbanColumn.vue'
 
 // Initialize drag and drop
@@ -39,49 +40,9 @@ const setColumnRef = (columnId, el) => {
   }
 }
 
-// Sample data - 100+ tasks per column like Linear
-const columns = ref([
-  {
-    id: 'todo',
-    title: '📝 To Do',
-    tasks: Array.from({ length: 100 }, (_, i) => ({
-      id: `todo-${i}`,
-      title: `Task ${i + 1}`,
-      priority: ['Low', 'Medium', 'High'][i % 3],
-      description: i % 2 === 0 ? 'Short description' : 'Longer description with more details'
-    }))
-  },
-  {
-    id: 'in-progress',
-    title: '🚀 In Progress',
-    tasks: Array.from({ length: 50 }, (_, i) => ({
-      id: `progress-${i}`,
-      title: `Task ${i + 1}`,
-      priority: ['Low', 'Medium', 'High'][i % 3],
-      description: 'Work in progress'
-    }))
-  },
-  {
-    id: 'review',
-    title: '👀 Review',
-    tasks: Array.from({ length: 30 }, (_, i) => ({
-      id: `review-${i}`,
-      title: `Task ${i + 1}`,
-      priority: ['Low', 'Medium', 'High'][i % 3],
-      description: 'Under review'
-    }))
-  },
-  {
-    id: 'done',
-    title: '✅ Done',
-    tasks: Array.from({ length: 75 }, (_, i) => ({
-      id: `done-${i}`,
-      title: `Task ${i + 1}`,
-      priority: 'Low',
-      description: 'Completed'
-    }))
-  }
-])
+// Generate data with variable height tasks (150 tasks per column)
+const columns = ref(generateDummyData(150))
+
 
 // Handle task movement
 const handleTaskMove = ({ task, sourceColumnId, sourceColumnIndex, targetColumnId, targetIndex }) => {
