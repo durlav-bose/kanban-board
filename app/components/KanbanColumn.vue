@@ -12,7 +12,6 @@
     </div>
     
     <div class="tasks-container" ref="tasksContainerRef">
-      <!-- Floating placeholder -->
       <div 
         v-if="showPlaceholder"
         class="floating-placeholder"
@@ -21,7 +20,6 @@
         <div class="placeholder-inner"></div>
       </div>
       
-      <!-- Using DynamicScroller for variable height items -->
       <DynamicScroller
         ref="scrollerRef"
         class="tasks-scroller"
@@ -63,7 +61,6 @@
       </DynamicScroller>
     </div>
     
-    <!-- Empty column state -->
     <div
       v-if="column.tasks.length === 0"
       class="empty-drop-zone"
@@ -124,12 +121,33 @@ const isSourceTask = (taskId, index) => {
   );
 };
 
-// Is this the SOURCE column (where drag started)?
-const isSourceColumn = computed(() => {
-  return dragDrop.isDragging.value && dragDrop.sourceColumnId.value === props.column.id;
-});
-
 // ============ PLACEHOLDER LOGIC ============
+
+// const placeholderInfo = computed(() => {
+//   if (!dragDrop.isDragging.value) return null;
+//   if (dragDrop.dropTargetColumnId.value !== props.column.id) return null;
+//   if (dragDrop.dropTargetIndex.value === null) return null;
+  
+//   const dropIdx = dragDrop.dropTargetIndex.value;
+//   const sourceIdx = dragDrop.sourceIndex.value;
+//   const isSameColumn = dragDrop.sourceColumnId.value === props.column.id;
+  
+//   if (isSameColumn) {
+//     // If the drop target is EXACTLY the source index, we display the placeholder.
+//     if (dropIdx === sourceIdx) {
+//       return { dropIndex: sourceIdx, isSameColumn, sourceIndex: sourceIdx };
+//     }
+    
+//     // We remove the dropIdx === sourceIdx + 1 check to allow the placeholder to show 
+//     // when moving down (Fix 1). The shifting logic handles the visual collapse.
+//   }
+  
+//   return {
+//     dropIndex: dropIdx,
+//     isSameColumn,
+//     sourceIndex: sourceIdx
+//   };
+// });
 
 const placeholderInfo = computed(() => {
   if (!dragDrop.isDragging.value) return null;
@@ -140,10 +158,11 @@ const placeholderInfo = computed(() => {
   const sourceIdx = dragDrop.sourceIndex.value;
   const isSameColumn = dragDrop.sourceColumnId.value === props.column.id;
   
-  // Same column: don't show placeholder at source or source+1
+  // Same column: don't show placeholder at source
   if (isSameColumn) {
     if (dropIdx === sourceIdx) return null;
-    if (dropIdx === sourceIdx + 1) return null;
+    // FIX: Removed the check for dropIdx === sourceIdx + 1 
+    // to allow placeholder to show when moving down past the source's original spot.
   }
   
   return {
@@ -153,32 +172,90 @@ const placeholderInfo = computed(() => {
   };
 });
 
-const showPlaceholder = computed(() => placeholderInfo.value !== null);
+// const showPlaceholder = computed(() => placeholderInfo.value !== null);
 
-// Calculate placeholder Y position
 // const placeholderStyle = computed(() => {
-//   if (!placeholderInfo.value) return { display: 'none' };
+//   if (!placeholderInfo.value || !tasksContainerRef.value) return { display: 'none' };
   
 //   const { dropIndex, isSameColumn, sourceIndex } = placeholderInfo.value;
   
-//   // Get scroll position
-//   const scrollTop = scrollerRef.value?.$el?.scrollTop || 0;
+//   // Get all rendered task wrapper elements
+//   const taskWrappers = tasksContainerRef.value?.querySelectorAll('.task-wrapper') || [];
   
-//   // Calculate visual index for positioning
-//   let visualIndex = dropIndex;
-//   if (isSameColumn && dropIndex > sourceIndex) {
-//     // Account for the hidden source task
-//     visualIndex = dropIndex - 1;
+//   // 1. Get placeholder height
+//   let placeholderHeight = MIN_ITEM_SIZE;
+//   if (isSameColumn) {
+//     const draggedTaskElement = Array.from(taskWrappers).find(wrapper => {
+//       const index = parseInt(wrapper.dataset.taskIndex);
+//       return index === sourceIndex;
+//     });
+//     if (draggedTaskElement) {
+//       placeholderHeight = draggedTaskElement.offsetHeight;
+//     }
+//   } else {
+//     placeholderHeight = dragDrop.placeholderHeight.value || MIN_ITEM_SIZE;
 //   }
   
-//   // Position based on item size
-//   const top = (visualIndex * ITEM_SIZE) - scrollTop;
+//   // 2. Calculate top position using Bounding Box (Fix 2)
+//   let top = 0;
+//   const containerRect = tasksContainerRef.value.getBoundingClientRect();
+  
+//   // Case A: Drop BEFORE an existing task (dropIndex < total tasks)
+//   if (dropIndex < props.column.tasks.length) {
+//     const targetWrapper = Array.from(taskWrappers).find(w => 
+//         parseInt(w.dataset.taskIndex) === dropIndex
+//     );
+    
+//     if (targetWrapper) {
+//       const wrapperRect = targetWrapper.getBoundingClientRect();
+//       // Position is the top of the target element, relative to the container
+//       top = wrapperRect.top - containerRect.top;
+      
+//     } else {
+//       // Fallback: If the target item is unrendered/off-screen (due to virtualization),
+//       // rely on estimation from the scroller's visible position if possible.
+//       const scrollerElement = scrollerRef.value?.$el;
+//       const scrollTop = scrollerElement ? scrollerElement.scrollTop : 0;
+      
+//       // Use cumulative height up to dropIndex as the fallback position
+//       let cumulativeTop = 0;
+//       for (let i = 0; i < dropIndex; i++) {
+//         const wrapper = Array.from(taskWrappers).find(w => 
+//           parseInt(w.dataset.taskIndex) === i
+//         );
+//         if (wrapper) {
+//           cumulativeTop += wrapper.offsetHeight;
+//         } else {
+//           cumulativeTop += MIN_ITEM_SIZE;
+//         }
+//       }
+      
+//       // Adjust for same-column moves in fallback
+//       if (isSameColumn && dropIndex > sourceIndex) {
+//         cumulativeTop -= placeholderHeight;
+//       }
+      
+//       // Position relative to the visible container
+//       top = cumulativeTop - scrollTop; 
+//     }
+//   } 
+//   // Case B: Drop at the very END of the list (dropIndex === total tasks)
+//   else if (dropIndex === props.column.tasks.length && taskWrappers.length > 0) {
+//     const lastWrapper = taskWrappers[taskWrappers.length - 1];
+//     if (lastWrapper) {
+//       const lastRect = lastWrapper.getBoundingClientRect();
+//       // Top position should be the bottom of the last task, relative to the container
+//       top = (lastRect.top - containerRect.top) + lastRect.offsetHeight;
+//     }
+//   }
   
 //   return {
 //     top: `${top}px`,
-//     height: `${PLACEHOLDER_HEIGHT}px`,
+//     height: `${placeholderHeight}px`,
 //   };
 // });
+
+const showPlaceholder = computed(() => placeholderInfo.value !== null);
 
 const placeholderStyle = computed(() => {
   if (!placeholderInfo.value) return { display: 'none' };
@@ -188,7 +265,7 @@ const placeholderStyle = computed(() => {
   // Get all rendered task wrapper elements
   const taskWrappers = tasksContainerRef.value?.querySelectorAll('.task-wrapper') || [];
   
-  // Get placeholder height
+  // Get placeholder height (logic remains the same)
   let placeholderHeight = MIN_ITEM_SIZE;
   if (isSameColumn) {
     const draggedTaskElement = Array.from(taskWrappers).find(wrapper => {
@@ -202,9 +279,8 @@ const placeholderStyle = computed(() => {
     placeholderHeight = dragDrop.placeholderHeight.value || MIN_ITEM_SIZE;
   }
   
-  // Calculate cumulative position by summing heights
+  // Calculate cumulative position by summing heights (logic remains the same)
   let cumulativeTop = 0;
-  let foundPosition = false;
   
   // Sum heights from index 0 to dropIndex
   for (let i = 0; i < dropIndex; i++) {
@@ -227,11 +303,13 @@ const placeholderStyle = computed(() => {
       // But it's invisible, so subtract its height to get the visual position
       cumulativeTop -= placeholderHeight;
     }
-    // Moving up: source is after drop, we didn't count it, position is correct
   }
   
+  // *** FIX: Subtract the scroll offset to get the correct visible position ***
+  const scrollTop = scrollerRef.value?.$el?.scrollTop || 0;
+  
   return {
-    top: `${cumulativeTop}px`,
+    top: `${cumulativeTop - scrollTop}px`, // FIX APPLIED HERE
     height: `${placeholderHeight}px`,
   };
 });
@@ -253,8 +331,8 @@ const getShiftDirection = (index) => {
   // Handle SOURCE column
   if (thisCol === sourceCol) {
     if (!placeholderInfo.value) {
-      // No placeholder in this column, but we're the source column
-      // All tasks after source should shift UP to fill the gap
+      // No placeholder in this column (e.g., dragged to another column)
+      // Tasks after source should shift UP to fill the gap
       if (index > sourceIdx) {
         return 'up';
       }
@@ -262,7 +340,7 @@ const getShiftDirection = (index) => {
     }
     
     // Same column drag with placeholder
-    const { dropIndex, isSameColumn } = placeholderInfo.value;
+    const { dropIndex } = placeholderInfo.value;
     
     if (index === sourceIdx) {
       return null; // Source task stays invisible
@@ -282,7 +360,7 @@ const getShiftDirection = (index) => {
       return null;
     }
     
-    return null;
+    return null; // If dropIndex === sourceIdx, no shift needed
   }
   
   // Handle TARGET column (different from source)
@@ -356,12 +434,37 @@ const handleTaskDragEnd = () => {
   dragDrop.handleDragEnd();
 };
 
+// const handleTaskDragOver = (event, index) => {
+//   if (!dragDrop.isDragging.value) return;
+//   event.stopPropagation();
+  
+//   const wrapper = event.currentTarget;
+//   // We no longer skip the source task wrapper (Fix 3)
+  
+//   const rect = wrapper.getBoundingClientRect();
+//   const mouseY = event.clientY;
+//   const middle = rect.top + rect.height / 2;
+  
+//   // If the event is over the source task's wrapper, force dropIndex to sourceIndex
+//   if (wrapper.classList.contains('is-dragging-source')) {
+//     const dropIndex = index; 
+//     dragDrop.handleDragOver(event, props.column.id, dropIndex);
+//     return;
+//   }
+  
+//   // For all other tasks: check middle line
+//   const dropIndex = mouseY < middle ? index : index + 1;
+//   dragDrop.handleDragOver(event, props.column.id, dropIndex);
+// };
+
+
 const handleTaskDragOver = (event, index) => {
   if (!dragDrop.isDragging.value) return;
   event.stopPropagation();
   
   const wrapper = event.currentTarget;
-  if (wrapper.classList.contains('is-dragging-source')) return;
+  // FIX: We now allow drag over on the source wrapper to correctly set dropIndex
+  // if (wrapper.classList.contains('is-dragging-source')) return; // REMOVED
   
   const rect = wrapper.getBoundingClientRect();
   const mouseY = event.clientY;
@@ -370,6 +473,7 @@ const handleTaskDragOver = (event, index) => {
   const dropIndex = mouseY < middle ? index : index + 1;
   dragDrop.handleDragOver(event, props.column.id, dropIndex);
 };
+
 
 const handleColumnDragOver = (event) => {
   if (!dragDrop.isDragging.value) return;
