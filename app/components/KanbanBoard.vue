@@ -46,11 +46,11 @@ const columns = ref(generateDummyData(150))
 
 // Handle task movement
 const handleTaskMove = ({ task, sourceColumnId, sourceColumnIndex, targetColumnId, targetIndex }) => {
-  console.log('[BOARD] Moving task:', {
-    task: task.title,
-    from: `${sourceColumnId}[${sourceColumnIndex}]`,
-    to: `${targetColumnId}[${targetIndex}]`
-  })
+  // console.log('[BOARD] Moving task:', {
+  //   task: task.title,
+  //   from: `${sourceColumnId}[${sourceColumnIndex}]`,
+  //   to: `${targetColumnId}[${targetIndex}]`
+  // })
   
   const sourceColumn = columns.value.find(col => col.id === sourceColumnId)
   const targetColumn = columns.value.find(col => col.id === targetColumnId)
