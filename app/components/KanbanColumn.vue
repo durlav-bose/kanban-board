@@ -1,6 +1,6 @@
 <template>
-  <div 
-    class="task-column" 
+  <div
+    class="task-column"
     :data-column="column.id"
     :class="{ 'column-drag-over': isDropTarget }"
     @dragover.prevent="handleColumnDragOver"
@@ -10,16 +10,18 @@
       <h2>{{ column.title }}</h2>
       <span class="task-count">{{ column.tasks.length }}</span>
     </div>
-    
+
     <div class="tasks-container" ref="tasksContainerRef">
-      <div 
+      <!-- Floating placeholder lives in tasks-container (overlay), but we position it
+           using task wrapper DOM rects which already reflect scroller scroll. -->
+      <div
         v-if="showPlaceholder"
         class="floating-placeholder"
         :style="placeholderStyle"
       >
         <div class="placeholder-inner"></div>
       </div>
-      
+
       <DynamicScroller
         ref="scrollerRef"
         class="tasks-scroller"
@@ -32,16 +34,12 @@
           <DynamicScrollerItem
             :item="item"
             :active="active"
-            :size-dependencies="[
-              item.title,
-              item.description,
-              item.priority
-            ]"
+            :size-dependencies="[item.title, item.description, item.priority]"
             :data-index="index"
           >
-            <div 
+            <div
               class="task-wrapper"
-              :class="{ 
+              :class="{
                 'is-dragging-source': isSourceTask(item.id, index),
                 [getShiftClass(index)]: true
               }"
@@ -60,14 +58,14 @@
         </template>
       </DynamicScroller>
     </div>
-    
+
     <div
       v-if="column.tasks.length === 0"
       class="empty-drop-zone"
       @dragover.prevent="handleEmptyColumnDragOver"
     >
-      <div 
-        v-if="dragDrop.isDragging.value && dragDrop.dropTargetColumnId.value === column.id" 
+      <div
+        v-if="dragDrop.isDragging.value && dragDrop.dropTargetColumnId.value === column.id"
         class="empty-placeholder"
       >
         <div class="placeholder-inner"></div>
@@ -86,38 +84,37 @@ import { DynamicScroller, DynamicScrollerItem } from "vue-virtual-scroller";
 import "vue-virtual-scroller/dist/vue-virtual-scroller.css";
 import KanbanTask from "./KanbanTask.vue";
 
-// Constants for dynamic scroller
+// Constants
 const MIN_ITEM_SIZE = 80;
-const PLACEHOLDER_HEIGHT = 80;
 
 const props = defineProps({
-  column: {
-    type: Object,
-    required: true,
-  },
+  column: { type: Object, required: true },
 });
 
 const emit = defineEmits(["task-move"]);
 
 const dragDrop = inject("kanbanDragDrop");
+
 const scrollerRef = ref(null);
 const tasksContainerRef = ref(null);
 
-// For anti-shake mechanism
+// Anti-shake throttle (your existing approach)
 const lastDropUpdate = ref(0);
 const DRAG_UPDATE_THROTTLE = 16; // ~60fps
 
 // ============ COMPUTED STATE ============
-
 const isDropTarget = computed(() => {
-  return dragDrop.isDragging.value && dragDrop.dropTargetColumnId.value === props.column.id;
+  return (
+    dragDrop.isDragging.value &&
+    dragDrop.dropTargetColumnId.value === props.column.id
+  );
 });
 
 // Is this the SOURCE task being dragged?
 const isSourceTask = (taskId, index) => {
   if (!dragDrop.isDragging.value) return false;
   if (!dragDrop.draggedTask.value) return false;
-  
+
   return (
     dragDrop.sourceColumnId.value === props.column.id &&
     dragDrop.sourceIndex.value === index &&
@@ -126,201 +123,176 @@ const isSourceTask = (taskId, index) => {
 };
 
 // ============ PLACEHOLDER LOGIC ============
-
 const placeholderInfo = computed(() => {
   if (!dragDrop.isDragging.value) return null;
   if (dragDrop.dropTargetColumnId.value !== props.column.id) return null;
   if (dragDrop.dropTargetIndex.value === null) return null;
-  
+
   const dropIdx = dragDrop.dropTargetIndex.value;
   const sourceIdx = dragDrop.sourceIndex.value;
   const isSameColumn = dragDrop.sourceColumnId.value === props.column.id;
-  
+
   // Same column: don't show placeholder at source position
   if (isSameColumn && dropIdx === sourceIdx) return null;
-  
+
   return {
     dropIndex: dropIdx,
     isSameColumn,
-    sourceIndex: sourceIdx
+    sourceIndex: sourceIdx,
   };
 });
 
 const showPlaceholder = computed(() => placeholderInfo.value !== null);
 
-// ============ PLACEHOLDER POSITIONING - FIXED VERSION ============
+// ============ PLACEHOLDER POSITIONING (SCROLL-SAFE + VIRTUAL-SCROLLER-SAFE) ============
 const placeholderStyle = computed(() => {
-  if (!placeholderInfo.value || !tasksContainerRef.value || !scrollerRef.value) return { display: 'none' };
-  
+  if (!placeholderInfo.value || !tasksContainerRef.value) {
+    return { display: "none" };
+  }
+
   const { dropIndex, isSameColumn, sourceIndex } = placeholderInfo.value;
-  
-  // Get all rendered task wrapper elements
-  const taskWrappers = tasksContainerRef.value.querySelectorAll('.task-wrapper') || [];
-  
-  // 1. Get placeholder height (logic is fine)
-  let placeholderHeight = MIN_ITEM_SIZE;
+
+  const containerEl = tasksContainerRef.value;
+  const containerRect = containerEl.getBoundingClientRect();
+
+  // Grab rendered wrappers only (virtual scroller renders a subset; that's fine)
+  const wrappers = Array.from(
+    containerEl.querySelectorAll(".task-wrapper[data-task-index]")
+  );
+
+  // 1) Determine placeholder height
+  let height = MIN_ITEM_SIZE;
+
   if (isSameColumn) {
-    const draggedTaskElement = Array.from(taskWrappers).find(wrapper => {
-      const index = parseInt(wrapper.dataset.taskIndex);
-      return index === sourceIndex;
-    });
-    if (draggedTaskElement) {
-      placeholderHeight = draggedTaskElement.offsetHeight;
-    }
-  } else {
-    placeholderHeight = dragDrop.placeholderHeight.value || MIN_ITEM_SIZE;
-  }
-  
-  // 2. Calculate cumulative position (unshifted position in the virtual list)
-  let cumulativeTop = 0;
-  
-  // Sum heights from index 0 to dropIndex
-  for (let i = 0; i < dropIndex; i++) {
-    const wrapper = Array.from(taskWrappers).find(w => 
-      parseInt(w.dataset.taskIndex) === i
+    const sourceEl = wrappers.find(
+      (w) => parseInt(w.dataset.taskIndex || "-1", 10) === sourceIndex
     );
-    
-    if (wrapper) {
-      console.log('wrapper.offsetHeight :>> ', wrapper.offsetHeight);
-      cumulativeTop += wrapper.offsetHeight;
+    if (sourceEl) height = sourceEl.offsetHeight || MIN_ITEM_SIZE;
+  } else {
+    height = dragDrop.placeholderHeight.value || MIN_ITEM_SIZE;
+  }
+
+  // 2) Determine placeholder TOP using rendered element rects (scroll-safe)
+  // We try to place it:
+  // - Before the element whose index == dropIndex (if rendered)
+  // - Otherwise after the last rendered element
+  // - If nothing rendered, top = 0
+  let top = 0;
+
+  if (wrappers.length === 0) {
+    top = 0;
+  } else {
+    // Sort wrappers by index for stable behavior
+    wrappers.sort(
+      (a, b) =>
+        parseInt(a.dataset.taskIndex || "0", 10) -
+        parseInt(b.dataset.taskIndex || "0", 10)
+    );
+
+    const beforeEl = wrappers.find(
+      (w) => parseInt(w.dataset.taskIndex || "-1", 10) === dropIndex
+    );
+
+    console.log('beforeEl :>> ', beforeEl);
+
+    if (beforeEl) {
+      const r = beforeEl.getBoundingClientRect();
+      console.log('r.top :>> ', r.top);
+      console.log('containerRect.top :>> ', containerRect.top);
+      top = r.top - containerRect.top;
+      console.log('top :>> ', top);
     } else {
-      // Element not rendered, use min size
-      cumulativeTop += MIN_ITEM_SIZE;
+      const last = wrappers[wrappers.length - 1];
+      const r = last.getBoundingClientRect();
+      top = r.bottom - containerRect.top;
+      console.log('top :>> ', top);
     }
   }
-  
-  // 3. Adjust for same-column moves (compensate for the invisible source task)
-  if (isSameColumn) {
-    // If the drop is after the source (dropIndex > sourceIndex), 
-    // the source task was included in the cumulativeTop calculation. 
-    // Since it's invisible, we must subtract its height to account for the removed element.
-    if (dropIndex > sourceIndex) {
-      cumulativeTop -= placeholderHeight;
-    }
-    // If the drop is before the source, the source task was NOT included, so no adjustment needed.
-  }
-  
-  // 4. *** CRITICAL FIX: Subtract the scroll offset to get the correct visible position ***
-  console.log('scrollerRef.value :>> ', scrollerRef.value);
-  const scrollTop = scrollerRef.value?.$el?.scrollTop
- || 0;
-  // const scrollTop = 0;
 
-  console.log('cumulativeTop :>> ', cumulativeTop);
-  console.log('scrollTop :>> ', scrollTop);
+  // Clamp to avoid negative top in edge cases
+  top = Math.max(0, top);
 
-  // The final position must be relative to the visible container.
-  const finalTop = cumulativeTop - scrollTop;
-
-  console.log('finalTop :>> ', finalTop);
-  
   return {
-    top: `${finalTop}px`,
-    height: `${placeholderHeight}px`,
+    top: `${top}px`,
+    height: `${height}px`,
   };
 });
 
+// ============ SHIFTING LOGIC (UNCHANGED) ============
 const getShiftDirection = (index) => {
   if (!dragDrop.isDragging.value) return null;
-  
+
   const sourceCol = dragDrop.sourceColumnId.value;
   const sourceIdx = dragDrop.sourceIndex.value;
   const targetCol = dragDrop.dropTargetColumnId.value;
   const thisCol = props.column.id;
-  
-  // Handle SOURCE column
+
+  // SOURCE column behavior
   if (thisCol === sourceCol) {
     if (!placeholderInfo.value) {
-      // No placeholder in this column (e.g., dragged to another column)
-      // Tasks after source should shift UP to fill the gap
-      if (index > sourceIdx) {
-        return 'up';
-      }
+      if (index > sourceIdx) return "up";
       return null;
     }
-    
-    // Same column drag with placeholder
+
     const { dropIndex } = placeholderInfo.value;
-    
-    if (index === sourceIdx) {
-      return null; // Source task stays invisible
-    }
-    
+
+    if (index === sourceIdx) return null;
+
     if (dropIndex < sourceIdx) {
-      // Moving UP: tasks between drop and source shift DOWN
-      if (index >= dropIndex && index < sourceIdx) {
-        return 'down';
-      }
+      if (index >= dropIndex && index < sourceIdx) return "down";
       return null;
     } else if (dropIndex > sourceIdx) {
-      // Moving DOWN: tasks between source and drop shift UP
-      if (index > sourceIdx && index < dropIndex) {
-        return 'up';
-      }
+      if (index > sourceIdx && index < dropIndex) return "up";
       return null;
     }
-    
-    return null; // If dropIndex === sourceIdx, no shift needed
+    return null;
   }
-  
-  // Handle TARGET column (different from source)
+
+  // TARGET column behavior
   if (thisCol === targetCol && placeholderInfo.value) {
     const { dropIndex } = placeholderInfo.value;
-    // Tasks at and after drop index shift DOWN to make space
-    if (index >= dropIndex) {
-      return 'down';
-    }
+    if (index >= dropIndex) return "down";
   }
-  
+
   return null;
 };
 
-// Calculate the shift class based on direction
 const getShiftClass = (index) => {
   const direction = getShiftDirection(index);
-  if (direction === 'down') return 'is-shifted';
-  if (direction === 'up') return 'is-shifted-up';
-  return '';
+  if (direction === "down") return "is-shifted";
+  if (direction === "up") return "is-shifted-up";
+  return "";
 };
 
-// Get inline shift style with dynamic height
 const getShiftStyle = (index) => {
   const direction = getShiftDirection(index);
   if (!direction) return {};
-  
+
   const sourceCol = dragDrop.sourceColumnId.value;
   const sourceIdx = dragDrop.sourceIndex.value;
   const thisCol = props.column.id;
-  
-  // Get the dragged task element to measure its height
-  const taskWrappers = tasksContainerRef.value?.querySelectorAll('.task-wrapper') || [];
+
+  const wrappers =
+    tasksContainerRef.value?.querySelectorAll(".task-wrapper") || [];
+
   let shiftAmount = MIN_ITEM_SIZE;
-  
+
   if (thisCol === sourceCol) {
-    // This IS the source column: measure the actual source task
-    const draggedTaskElement = Array.from(taskWrappers).find(wrapper => {
-      const wrapperIndex = parseInt(wrapper.dataset.taskIndex);
-      return wrapperIndex === sourceIdx;
-    });
-    shiftAmount = draggedTaskElement?.offsetHeight || MIN_ITEM_SIZE;
+    const sourceEl = Array.from(wrappers).find(
+      (w) => parseInt(w.dataset.taskIndex || "-1", 10) === sourceIdx
+    );
+    shiftAmount = sourceEl?.offsetHeight || MIN_ITEM_SIZE;
   } else {
-    // This is NOT the source column (target column): use stored height
     shiftAmount = dragDrop.placeholderHeight.value || MIN_ITEM_SIZE;
   }
-  
-  if (direction === 'up') {
-    // Shift UP to fill gap
-    return { transform: `translateY(-${shiftAmount}px)` };
-  } else if (direction === 'down') {
-    // Shift DOWN to make space
-    return { transform: `translateY(${shiftAmount}px)` };
-  }
-  
+
+  if (direction === "up") return { transform: `translateY(-${shiftAmount}px)` };
+  if (direction === "down") return { transform: `translateY(${shiftAmount}px)` };
+
   return {};
 };
 
 // ============ EVENT HANDLERS ============
-
 const handleTaskDragStart = (event, task, index) => {
   const element = event.target.closest('[draggable="true"]');
   if (!element) {
@@ -334,74 +306,39 @@ const handleTaskDragEnd = () => {
   dragDrop.handleDragEnd();
 };
 
-// const handleTaskDragOver = (event, index) => {
-//   if (!dragDrop.isDragging.value) return;
-//   event.stopPropagation();
-  
-//   const wrapper = event.currentTarget;
-//   // We no longer skip the source task wrapper (Fix 3)
-  
-//   const rect = wrapper.getBoundingClientRect();
-//   const mouseY = event.clientY;
-//   const middle = rect.top + rect.height / 2;
-  
-//   // If the event is over the source task's wrapper, force dropIndex to sourceIndex
-//   if (wrapper.classList.contains('is-dragging-source')) {
-//     const dropIndex = index; 
-//     dragDrop.handleDragOver(event, props.column.id, dropIndex);
-//     return;
-//   }
-  
-//   // For all other tasks: check middle line
-//   const dropIndex = mouseY < middle ? index : index + 1;
-//   dragDrop.handleDragOver(event, props.column.id, dropIndex);
-// };
-
-
 const handleTaskDragOver = (event, index) => {
   if (!dragDrop.isDragging.value) return;
   event.stopPropagation();
-  
-  // Throttle updates to prevent shaking with tall tasks
+
   const now = Date.now();
-  if (now - lastDropUpdate.value < DRAG_UPDATE_THROTTLE) {
-    return;
-  }
-  
+  if (now - lastDropUpdate.value < DRAG_UPDATE_THROTTLE) return;
+
   const wrapper = event.currentTarget;
   const rect = wrapper.getBoundingClientRect();
   const mouseY = event.clientY;
-  
-  // Calculate relative position with hysteresis to prevent rapid oscillation
-  const elementHeight = rect.height;
+
+  const elementHeight = rect.height || 1;
   const relativeY = mouseY - rect.top;
   const percentY = relativeY / elementHeight;
-  
-  // Add hysteresis: require crossing 40% or 60% threshold
-  // This prevents jittering when hovering near the middle of tall elements
+
   let dropIndex;
   const currentDropIndex = dragDrop.dropTargetIndex.value;
   const currentIsAbove = currentDropIndex === index;
   const currentIsBelow = currentDropIndex === index + 1;
-  
+
   if (currentIsAbove) {
-    // Currently above, need to cross 60% to move below
     dropIndex = percentY > 0.6 ? index + 1 : index;
   } else if (currentIsBelow) {
-    // Currently below, need to cross 40% to move above
     dropIndex = percentY < 0.4 ? index : index + 1;
   } else {
-    // Not near current position, use 50% rule
     dropIndex = percentY < 0.5 ? index : index + 1;
   }
-  
-  // Only update if changed
+
   if (dropIndex !== dragDrop.dropTargetIndex.value) {
     lastDropUpdate.value = now;
     dragDrop.handleDragOver(event, props.column.id, dropIndex);
   }
 };
-
 
 const handleColumnDragOver = (event) => {
   if (!dragDrop.isDragging.value) return;
@@ -411,22 +348,30 @@ const handleColumnDragOver = (event) => {
   const container = tasksContainerRef.value;
   if (!container) return;
 
-  // DON'T filter out source task
-  const taskWrappers = Array.from(container.querySelectorAll('.task-wrapper[data-task-index]'));
-  
-  if (taskWrappers.length === 0) {
+  const wrappers = Array.from(
+    container.querySelectorAll(".task-wrapper[data-task-index]")
+  );
+
+  if (wrappers.length === 0) {
     dragDrop.dropTargetColumnId.value = props.column.id;
     dragDrop.dropTargetIndex.value = 0;
     return;
   }
 
+  // Sort by index for consistency
+  wrappers.sort(
+    (a, b) =>
+      parseInt(a.dataset.taskIndex || "0", 10) -
+      parseInt(b.dataset.taskIndex || "0", 10)
+  );
+
   let insertIndex = props.column.tasks.length;
 
-  for (const wrapper of taskWrappers) {
-    const rect = wrapper.getBoundingClientRect();
+  for (const w of wrappers) {
+    const rect = w.getBoundingClientRect();
     if (rect.height === 0) continue;
-    
-    const taskIndex = parseInt(wrapper.dataset.taskIndex || '0');
+
+    const taskIndex = parseInt(w.dataset.taskIndex || "0", 10);
     const middle = rect.top + rect.height / 2;
 
     if (mouseY < middle) {
@@ -470,9 +415,7 @@ onUnmounted(() => {
   }
 });
 
-defineExpose({
-  scrollerRef,
-});
+defineExpose({ scrollerRef });
 </script>
 
 <style scoped>
@@ -523,36 +466,34 @@ defineExpose({
   font-weight: 600;
 }
 
-/* Tasks container - THIS IS CRITICAL FOR SCROLL */
+/* Tasks container */
 .tasks-container {
   flex: 1;
-  min-height: 0; /* Critical for flex child to scroll */
+  min-height: 0;
   position: relative;
   overflow: hidden;
 }
 
-/* RecycleScroller needs explicit height */
+/* Scroller */
 .tasks-scroller {
   height: 100%;
   overflow-y: auto !important;
   overflow-x: hidden;
+  position: relative;
 }
 
 /* Scrollbar styling */
 .tasks-scroller::-webkit-scrollbar {
   width: 8px;
 }
-
 .tasks-scroller::-webkit-scrollbar-track {
   background: rgba(71, 85, 105, 0.2);
   border-radius: 4px;
 }
-
 .tasks-scroller::-webkit-scrollbar-thumb {
   background: rgba(71, 85, 105, 0.6);
   border-radius: 4px;
 }
-
 .tasks-scroller::-webkit-scrollbar-thumb:hover {
   background: rgba(71, 85, 105, 0.8);
 }
@@ -565,13 +506,11 @@ defineExpose({
   position: relative;
 }
 
-/* Source task - invisible */
+/* Source task invisible */
 .task-wrapper.is-dragging-source {
   opacity: 0;
   pointer-events: none;
 }
-
-/* Shifted tasks - transforms applied via inline styles for dynamic heights */
 
 /* Floating placeholder */
 .floating-placeholder {
