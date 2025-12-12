@@ -98,11 +98,8 @@ export function useKanbanDragDrop() {
     console.log('  From:', srcCol, 'index', srcIdx)
     console.log('  To:', targetCol, 'index', targetIdx)
 
-    // Adjust for same-column moves
-    if (srcCol === targetCol && targetIdx > srcIdx) {
-      targetIdx = targetIdx - 1
-    }
-
+    // targetIdx is already in "visual space" (without dragged task) from computeDropIndexOverTask
+    // No need to adjust here
     const finalIdx = Math.max(0, targetIdx)
     console.log('  Final index:', finalIdx)
 

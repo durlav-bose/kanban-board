@@ -169,19 +169,9 @@ const renderItems = computed(() => {
     list = list.filter((t) => t.id !== srcId);
   }
 
-  // Clamp index in this list’s coordinate space
-  // IMPORTANT: dropTargetIndex should already be “without dragged” for same-column,
-  // BUT many implementations store it in original space.
-  // We normalize here:
+  // The dropIndexRaw is already in "without dragged" space from computeDropIndexOverTask
+  // No need to normalize again
   let dropIndex = info.dropIndexRaw;
-
-  if (
-    info.isSameColumn &&
-    typeof info.sourceIndex === "number" &&
-    dropIndex > info.sourceIndex
-  ) {
-    dropIndex = dropIndex - 1;
-  }
 
   dropIndex = Math.max(0, Math.min(dropIndex, list.length));
 
@@ -218,13 +208,16 @@ function computeDropIndexOverTask(event, hoveredTaskId) {
 
   let raw = mouseY < mid ? hoveredIndex : hoveredIndex + 1;
 
-  // Normalize for same-column “without dragged” space
+  // Normalize for same-column "without dragged" space
   if (
     isSameColumn.value &&
-    typeof dragDrop.sourceIndex.value === "number" &&
-    raw > dragDrop.sourceIndex.value
+    typeof dragDrop.sourceIndex.value === "number"
   ) {
-    raw = raw - 1;
+    const sourceIdx = dragDrop.sourceIndex.value;
+    // Only adjust if not hovering source task itself AND raw is after source
+    if (hoveredIndex !== sourceIdx && raw > sourceIdx) {
+      raw = raw - 1;
+    }
   }
 
   // Clamp in target list length (without dragged if same column)
