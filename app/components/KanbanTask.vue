@@ -46,17 +46,19 @@ defineEmits(['dragstart', 'dragend', 'dragover'])
   user-select: none;
   position: relative;
   opacity: 1;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
 
 .task:hover {
   border-color: #6366f1;
   box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
   background: linear-gradient(135deg, #3b4d65 0%, #242e3f 100%);
-  /* transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); */
+  transform: translateY(-1px);
 }
 
 .task:active {
   cursor: grabbing;
+  transform: scale(1.02);
 }
 
 .task-content {

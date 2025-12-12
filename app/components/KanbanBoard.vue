@@ -1,10 +1,10 @@
 <template>
   <div>
     <div class="board-header">
-      <h1>📋 Kanban Board with Virtual Scroll</h1>
+      <h1>📋 Kanban Board - Linear Style</h1>
     </div>
     
-    <div class="container">
+    <div class="container" ref="boardContainer">
       <KanbanColumn
         v-for="column in columns" 
         :key="column.id"
@@ -26,6 +26,9 @@ const dragDrop = useKanbanDragDrop()
 
 // Provide to child components
 provide('kanbanDragDrop', dragDrop)
+
+// Board container ref (for auto-scroll if needed)
+const boardContainer = ref(null)
 
 // Track column refs
 const columnRefs = ref({})
@@ -100,9 +103,14 @@ const handleTaskMove = ({ task, sourceColumnId, sourceColumnIndex, targetColumnI
     // Same column move
     const newTasks = [...sourceColumn.tasks]
     const [movedTask] = newTasks.splice(sourceColumnIndex, 1)
+    
+    // targetIndex is already in the filtered list context
+    // so we can insert directly
     const clampedIndex = Math.max(0, Math.min(targetIndex, newTasks.length))
     newTasks.splice(clampedIndex, 0, movedTask)
     sourceColumn.tasks = newTasks
+    
+    console.log('[BOARD] Same column move complete. New order:', newTasks.map(t => t.title))
   } else {
     // Cross-column move
     const sourceNewTasks = [...sourceColumn.tasks]
@@ -114,9 +122,9 @@ const handleTaskMove = ({ task, sourceColumnId, sourceColumnIndex, targetColumnI
     
     sourceColumn.tasks = sourceNewTasks
     targetColumn.tasks = targetNewTasks
+    
+    console.log('[BOARD] Cross-column move complete')
   }
-  
-  console.log('[BOARD] Task moved successfully')
 }
 </script>
 
@@ -163,6 +171,16 @@ const handleTaskMove = ({ task, sourceColumnId, sourceColumnIndex, targetColumnI
 
 .container::-webkit-scrollbar-thumb:hover {
   background: #64748b;
+}
+
+/* Global dragging styles */
+:global(.is-dragging) {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+:global(.is-dragging *) {
+  cursor: grabbing !important;
 }
 
 @media (max-width: 768px) {

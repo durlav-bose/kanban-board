@@ -2,6 +2,7 @@
   <div 
     class="task-column" 
     :data-column="column.id"
+    :class="{ 'column-drag-over': isDropTarget }"
     @dragover.prevent="handleColumnDragOver"
     @drop.prevent="handleColumnDrop"
   >
@@ -10,192 +11,203 @@
       <span class="task-count">{{ column.tasks.length }}</span>
     </div>
     
-    <DynamicScroller
-      ref="scroller"
-      :items="column.tasks"
-      :min-item-size="minItemSize"
-      class="tasks-scroller"
-      key-field="id"
-      :buffer="buffer"
+    <RecycleScroller
+      ref="scrollerRef"
+  class="tasks-scroller"
+  :items="filteredTasks"        
+  :item-size="100"
+  key-field="id"
+  :buffer="300"
+  :page-mode="false"
+  @scroll="handleScroll"
     >
-      <template #default="{ item, index, active }">
-        <DynamicScrollerItem
-          :item="item"
-          :active="active"
-          :size-dependencies="[item.title, item.priority]"
-          :data-index="index"
-        >
-          <!-- Placeholder before task -->
-          <transition name="placeholder-fade">
-            <div 
-              v-if="shouldShowPlaceholder(index)"
-              class="task-placeholder"
-              :style="{ height: `${dragDrop.placeholderHeight.value}px` }"
-            >
-              <div class="placeholder-inner"></div>
-            </div>
-          </transition>
-
-          <!-- Task (hidden when being dragged) -->
-          <div 
-            v-if="!isTaskBeingDragged(item.id)"
-            class="task-wrapper"
-            :data-task-index="index"
-            :data-task-id="item.id"
-            @dragover.prevent="handleTaskDragOver($event, index)"
-          >
-            <KanbanTask
-              :task="item"
-              @dragstart="handleTaskDragStart($event, item, index)"
-              @dragend="handleTaskDragEnd"
-            />
-          </div>
-
-          <!-- Placeholder after last task -->
-          <transition name="placeholder-fade">
-            <div 
-              v-if="shouldShowPlaceholderAfter(index)"
-              class="task-placeholder"
-              :style="{ height: `${dragDrop.placeholderHeight.value}px` }"
-            >
-              <div class="placeholder-inner"></div>
-            </div>
-          </transition>
-        </DynamicScrollerItem>
-      </template>
-      
-      <!-- Empty column drop zone -->
-      <template #after v-if="column.tasks.length === 0">
+      <template #default="{ item, index }">
         <div 
-          class="empty-drop-zone"
-          @dragover.prevent="handleEmptyDragOver"
+          v-if="dragDrop.shouldShowPlaceholder(column.id, index)"
+          class="task-placeholder"
+          :style="{ height: `${dragDrop.placeholderHeight.value}px` }"
         >
-          <transition name="placeholder-fade">
-            <div 
-              v-if="dragDrop.shouldShowEmptyPlaceholder(column.id, true)"
-              class="task-placeholder"
-              :style="{ height: `${dragDrop.placeholderHeight.value}px` }"
-            >
-              <div class="placeholder-inner"></div>
-            </div>
-          </transition>
-          <div v-if="column.tasks.length === 0 || dragDrop.isDragging.value" class="empty-state">
-            <span class="empty-icon">📋</span>
-            <span>Drop tasks here</span>
-          </div>
+          <div class="placeholder-inner"></div>
+        </div>
+
+        <div 
+          class="task-wrapper"
+          :data-task-index="index"
+          :data-task-id="item.id"
+          @dragover.prevent.stop="handleTaskDragOver($event, index)"
+        >
+          <KanbanTask
+            :task="item"
+            :class="{ 'being-dragged': isTaskBeingDragged(item.id) }"
+            @dragstart="handleTaskDragStart($event, item, index)"
+            @dragend="handleTaskDragEnd"
+          />
         </div>
       </template>
-    </DynamicScroller>
+      
+      </RecycleScroller>
+    
+    <div 
+      v-if="dragDrop.shouldShowPlaceholderAtEnd(column.id, column.tasks.length)"
+      class="task-placeholder"
+      :style="{ height: `${dragDrop.placeholderHeight.value}px` }"
+    >
+      <div class="placeholder-inner"></div>
+    </div>
+    
+    <div
+      v-if="dragDrop.shouldShowEmptyPlaceholder(column.id, isColumnEmpty)"
+      class="empty-column-drop-target"
+      @dragover.prevent="handleEmptyColumnDragOver"
+    >
+      <span class="text-center">Drop task here</span>
+    </div>
+    
   </div>
 </template>
 
 <script setup>
-import { ref, inject, onMounted, onUnmounted } from 'vue'
-import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
-import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
-import KanbanTask from './KanbanTask.vue'
+import { ref, inject, computed, onMounted, onUnmounted } from "vue";
+import { RecycleScroller } from "vue-virtual-scroller";
+import "vue-virtual-scroller/dist/vue-virtual-scroller.css";
+import KanbanTask from "./KanbanTask.vue";
 
 const props = defineProps({
   column: {
     type: Object,
-    required: true
+    required: true,
   },
-  minItemSize: {
-    type: Number,
-    default: 100
-  },
-  buffer: {
-    type: Number,
-    default: 200
-  }
-})
+});
 
-const emit = defineEmits(['task-move'])
+const emit = defineEmits(["task-move"]);
 
-const dragDrop = inject('kanbanDragDrop')
-const scroller = ref(null)
+const dragDrop = inject("kanbanDragDrop");
+const scrollerRef = ref(null);
 
 // Check if this task is being dragged
 const isTaskBeingDragged = (taskId) => {
-  return dragDrop.isDragging.value && dragDrop.draggedTask.value?.id === taskId
-}
+  return dragDrop.draggedTask.value?.id === taskId
+};
 
-// Show placeholder at drop position
-const shouldShowPlaceholder = (index) => {
-  return dragDrop.isDragging.value && 
-         dragDrop.dropTargetColumnId.value === props.column.id && 
-         dragDrop.dropTargetIndex.value === index
-}
-
-// Show placeholder after last task
-const shouldShowPlaceholderAfter = (index) => {
-  const isLast = index === props.column.tasks.length - 1
-  return dragDrop.isDragging.value && 
-         isLast && 
-         dragDrop.dropTargetColumnId.value === props.column.id && 
-         dragDrop.dropTargetIndex.value > index
-}
-
-const handleTaskDragStart = (event, task, index) => {
-  const element = event.target.closest('.task')
-  if (!element) return
+// CRITICAL FIX: Define the filtered list
+const filteredTasks = computed(() => {
+  if (!dragDrop.isDragging.value) {
+    // Return original list when not dragging
+    return props.column.tasks
+  }
   
+  // Filter out the dragged task based on ID
+  return props.column.tasks.filter(
+    (t) => !isTaskBeingDragged(t.id)
+  )
+})
+
+// Check if column is empty
+const isColumnEmpty = computed(() => filteredTasks.value.length === 0)
+
+// Check if this column is the current drop target
+const isDropTarget = computed(() => {
+  return (
+    dragDrop.isDragging.value &&
+    dragDrop.dropTargetColumnId.value === props.column.id
+  );
+});
+
+// ============ EVENT HANDLERS ============
+const handleTaskDragStart = (event, task, index) => {
+  // CRITICAL FIX: Use event.target.closest('[draggable="true"]') 
+  // to reliably find the outer element of the task component.
+  const element = event.target.closest('[draggable="true"]')
+  
+  if (!element) {
+    console.error('Failed to find draggable element in KanbanColumn.')
+    // Prevent the drag from continuing if element is null
+    event.preventDefault() 
+    return
+  }
+  
+  // Pass the actual DOM element to the hook
   dragDrop.handleDragStart(event, task, props.column.id, index, element)
 }
 
 const handleTaskDragEnd = () => {
-  dragDrop.handleDragEnd()
-}
+  dragDrop.handleDragEnd();
+};
 
 const handleTaskDragOver = (event, index) => {
-  event.stopPropagation()
-  dragDrop.handleDragOver(event, props.column.id, index)
-}
+  event.stopPropagation();
+  dragDrop.handleDragOver(event, props.column.id, index);
+};
 
 const handleColumnDragOver = (event) => {
-  event.preventDefault()
-  dragDrop.handleColumnDragOver(event, props.column.id, props.column.tasks.length)
-}
+  event.preventDefault();
 
-const handleEmptyDragOver = (event) => {
-  dragDrop.handleEmptyColumnDragOver(event, props.column.id)
-}
+  // Use mouse position to calculate drop index
+  const mouseY = event.clientY;
+  const column = event.currentTarget;
+
+  // Get all visible task elements
+  const taskElements = Array.from(column.querySelectorAll("[data-task-id]"));
+
+  if (taskElements.length === 0) {
+    dragDrop.dropTargetColumnId.value = props.column.id;
+    dragDrop.dropTargetIndex.value = 0;
+    return;
+  }
+
+  // Find insertion point based on mouse Y
+  let insertIndex = taskElements.length;
+
+  for (let i = 0; i < taskElements.length; i++) {
+    const rect = taskElements[i].getBoundingClientRect();
+    const middle = rect.top + rect.height / 2;
+
+    if (mouseY < middle) {
+      insertIndex = i;
+      break;
+    }
+  }
+
+  dragDrop.dropTargetColumnId.value = props.column.id;
+  dragDrop.dropTargetIndex.value = insertIndex;
+};
 
 const handleColumnDrop = (event) => {
   dragDrop.handleDrop(event, props.column.id, (moveData) => {
-    emit('task-move', moveData)
-  })
-}
+    emit("task-move", moveData);
+  });
+};
 
-const forceUpdate = () => {
-  if (scroller.value) {
-    scroller.value.forceUpdate()
-  }
-}
+const handleEmptyColumnDragOver = (event) => {
+  dragDrop.handleEmptyColumnDragOver(event, props.column.id);
+};
 
-// ESC key to cancel drag
-let escapeHandler = null
+const handleScroll = () => {
+  // Can be used for auto-scroll during drag if needed
+};
+
+// ============ ESC KEY TO CANCEL ============
+let escapeHandler = null;
 
 onMounted(() => {
   escapeHandler = (e) => {
-    if (e.key === 'Escape' && dragDrop.isDragging.value) {
-      console.log('[ESC] Cancelling drag')
-      dragDrop.resetDragState()
+    if (e.key === "Escape" && dragDrop.isDragging.value) {
+      console.log("[ESC] Cancelling drag");
+      dragDrop.resetDragState();
     }
-  }
-  window.addEventListener('keydown', escapeHandler)
-})
+  };
+  window.addEventListener("keydown", escapeHandler);
+});
 
 onUnmounted(() => {
   if (escapeHandler) {
-    window.removeEventListener('keydown', escapeHandler)
+    window.removeEventListener("keydown", escapeHandler);
   }
-})
+});
 
 defineExpose({
-  forceUpdate,
-  scroller
-})
+  scrollerRef,
+});
 </script>
 
 <style scoped>
@@ -211,6 +223,13 @@ defineExpose({
   display: flex;
   flex-direction: column;
   max-height: calc(100vh - 180px);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.task-column.column-drag-over {
+  border-color: rgba(99, 102, 241, 0.5);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2),
+    inset 0 0 0 1px rgba(99, 102, 241, 0.2);
 }
 
 .column-header {
@@ -283,9 +302,9 @@ defineExpose({
   inset: 0;
   background: linear-gradient(
     90deg,
-    rgba(99, 102, 241, 0.0) 0%,
+    rgba(99, 102, 241, 0) 0%,
     rgba(99, 102, 241, 0.3) 50%,
-    rgba(99, 102, 241, 0.0) 100%
+    rgba(99, 102, 241, 0) 100%
   );
   animation: shimmer 1.5s ease-in-out infinite;
 }
@@ -314,13 +333,12 @@ defineExpose({
 }
 
 .empty-drop-zone {
-  min-height: 200px;
-  padding: 20px;
+  min-height: 100px;
+  padding: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-direction: column;
-  gap: 10px;
 }
 
 .empty-state {
@@ -331,6 +349,7 @@ defineExpose({
   flex-direction: column;
   gap: 10px;
   align-items: center;
+  padding: 40px 20px;
 }
 
 .empty-icon {
@@ -338,12 +357,10 @@ defineExpose({
   opacity: 0.5;
 }
 
-:deep(.vue-recycle-scroller__item-wrapper) {
-  width: 100%;
-}
-
-:deep(.vue-recycle-scroller__item-view) {
-  width: 100%;
+/* Hide the task being dragged but keep it in the DOM for drag to work */
+.task-wrapper .being-dragged {
+  opacity: 0;
+  pointer-events: none;
 }
 
 @media (max-width: 1024px) {
