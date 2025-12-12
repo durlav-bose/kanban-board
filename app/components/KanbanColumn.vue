@@ -12,20 +12,10 @@
     </div>
 
     <div class="tasks-container" ref="tasksContainerRef">
-      <!-- Floating placeholder lives in tasks-container (overlay), but we position it
-           using task wrapper DOM rects which already reflect scroller scroll. -->
-      <div
-        v-if="showPlaceholder"
-        class="floating-placeholder"
-        :style="placeholderStyle"
-      >
-        <div class="placeholder-inner"></div>
-      </div>
-
       <DynamicScroller
         ref="scrollerRef"
         class="tasks-scroller"
-        :items="column.tasks"
+        :items="renderItems"
         :min-item-size="MIN_ITEM_SIZE"
         key-field="id"
         :buffer="200"
@@ -34,45 +24,52 @@
           <DynamicScrollerItem
             :item="item"
             :active="active"
-            :size-dependencies="[item.title, item.description, item.priority]"
+            :size-dependencies="getSizeDeps(item)"
             :data-index="index"
           >
+            <!-- PLACEHOLDER ITEM (real list item) -->
             <div
+              v-if="item.isPlaceholder"
+              class="task-wrapper placeholder-wrapper"
+              :style="{ height: `${placeholderHeight}px` }"
+              data-placeholder="true"
+            >
+              <div class="floating-placeholder">
+                <div class="placeholder-inner"></div>
+              </div>
+            </div>
+
+            <!-- REAL TASK ITEM -->
+            <div
+              v-else
               class="task-wrapper"
-              :class="{
-                'is-dragging-source': isSourceTask(item.id, index),
-                [getShiftClass(index)]: true
-              }"
-              :style="getShiftStyle(index)"
-              :data-task-index="index"
               :data-task-id="item.id"
-              @dragover.prevent.stop="handleTaskDragOver($event, index)"
+              :data-task-index="taskIndexById[item.id]"
+              @dragover.prevent.stop="handleTaskDragOver($event, item.id)"
             >
               <KanbanTask
                 :task="item"
-                @dragstart="handleTaskDragStart($event, item, index)"
+                @dragstart="handleTaskDragStart($event, item)"
                 @dragend="handleTaskDragEnd"
               />
             </div>
           </DynamicScrollerItem>
         </template>
       </DynamicScroller>
-    </div>
 
-    <div
-      v-if="column.tasks.length === 0"
-      class="empty-drop-zone"
-      @dragover.prevent="handleEmptyColumnDragOver"
-    >
+      <!-- Empty column drop zone -->
       <div
-        v-if="dragDrop.isDragging.value && dragDrop.dropTargetColumnId.value === column.id"
-        class="empty-placeholder"
+        v-if="column.tasks.length === 0"
+        class="empty-drop-zone"
+        @dragover.prevent="handleEmptyColumnDragOver"
       >
-        <div class="placeholder-inner"></div>
-      </div>
-      <div v-else class="empty-state">
-        <span class="empty-icon">📋</span>
-        <span>Drop tasks here</span>
+        <div v-if="isDropTarget" class="empty-placeholder">
+          <div class="placeholder-inner"></div>
+        </div>
+        <div v-else class="empty-state">
+          <span class="empty-icon">📋</span>
+          <span>Drop tasks here</span>
+        </div>
       </div>
     </div>
   </div>
@@ -84,7 +81,6 @@ import { DynamicScroller, DynamicScrollerItem } from "vue-virtual-scroller";
 import "vue-virtual-scroller/dist/vue-virtual-scroller.css";
 import KanbanTask from "./KanbanTask.vue";
 
-// Constants
 const MIN_ITEM_SIZE = 80;
 
 const props = defineProps({
@@ -98,290 +94,252 @@ const dragDrop = inject("kanbanDragDrop");
 const scrollerRef = ref(null);
 const tasksContainerRef = ref(null);
 
-// Anti-shake throttle (your existing approach)
+// Small throttle to reduce jitter in very tall items
 const lastDropUpdate = ref(0);
-const DRAG_UPDATE_THROTTLE = 16; // ~60fps
+const DRAG_UPDATE_THROTTLE = 16;
 
-// ============ COMPUTED STATE ============
+// =====================
+// DERIVED / COMPUTED
+// =====================
+
 const isDropTarget = computed(() => {
   return (
-    dragDrop.isDragging.value &&
+    !!dragDrop?.draggedTask?.value &&
     dragDrop.dropTargetColumnId.value === props.column.id
   );
 });
 
-// Is this the SOURCE task being dragged?
-const isSourceTask = (taskId, index) => {
-  if (!dragDrop.isDragging.value) return false;
-  if (!dragDrop.draggedTask.value) return false;
+const isSameColumn = computed(() => {
+  return dragDrop?.sourceColumnId?.value === props.column.id;
+});
 
-  return (
-    dragDrop.sourceColumnId.value === props.column.id &&
-    dragDrop.sourceIndex.value === index &&
-    dragDrop.draggedTask.value.id === taskId
-  );
-};
+const draggedTaskId = computed(() => dragDrop?.draggedTask?.value?.id || null);
 
-// ============ PLACEHOLDER LOGIC ============
+const taskIndexById = computed(() => {
+  const map = Object.create(null);
+  for (let i = 0; i < props.column.tasks.length; i++) {
+    map[props.column.tasks[i].id] = i;
+  }
+  return map;
+});
+
+// Info needed to decide whether placeholder is shown in this column
 const placeholderInfo = computed(() => {
-  if (!dragDrop.isDragging.value) return null;
+  if (!draggedTaskId.value) return null;
   if (dragDrop.dropTargetColumnId.value !== props.column.id) return null;
-  if (dragDrop.dropTargetIndex.value === null) return null;
+  if (dragDrop.dropTargetIndex.value === null || dragDrop.dropTargetIndex.value === undefined) return null;
 
   const dropIdx = dragDrop.dropTargetIndex.value;
-  const sourceIdx = dragDrop.sourceIndex.value;
-  const isSameColumn = dragDrop.sourceColumnId.value === props.column.id;
+  const srcIdx = dragDrop.sourceIndex.value;
+  const same = isSameColumn.value;
 
-  // Same column: don't show placeholder at source position
-  if (isSameColumn && dropIdx === sourceIdx) return null;
+  // In same column: if drop target equals source position, no placeholder needed
+  if (same && typeof srcIdx === "number" && dropIdx === srcIdx) return null;
 
   return {
-    dropIndex: dropIdx,
-    isSameColumn,
-    sourceIndex: sourceIdx,
+    dropIndexRaw: dropIdx,         // might be in original index space
+    sourceIndex: srcIdx,
+    isSameColumn: same,
   };
 });
 
-const showPlaceholder = computed(() => placeholderInfo.value !== null);
+// The placeholder’s visual height
+const placeholderHeight = computed(() => {
+  // Prefer the height captured on dragStart
+  const h = dragDrop?.placeholderHeight?.value;
+  if (h && Number(h) > 0) return Number(h);
 
-// ============ PLACEHOLDER POSITIONING (SCROLL-SAFE + VIRTUAL-SCROLLER-SAFE) ============
-const placeholderStyle = computed(() => {
-  if (!placeholderInfo.value || !tasksContainerRef.value) {
-    return { display: "none" };
-  }
-
-  const { dropIndex, isSameColumn, sourceIndex } = placeholderInfo.value;
-
-  const containerEl = tasksContainerRef.value;
-  const containerRect = containerEl.getBoundingClientRect();
-
-  // Grab rendered wrappers only (virtual scroller renders a subset; that's fine)
-  const wrappers = Array.from(
-    containerEl.querySelectorAll(".task-wrapper[data-task-index]")
-  );
-
-  // 1) Determine placeholder height
-  let height = MIN_ITEM_SIZE;
-
-  if (isSameColumn) {
-    const sourceEl = wrappers.find(
-      (w) => parseInt(w.dataset.taskIndex || "-1", 10) === sourceIndex
-    );
-    if (sourceEl) height = sourceEl.offsetHeight || MIN_ITEM_SIZE;
-  } else {
-    height = dragDrop.placeholderHeight.value || MIN_ITEM_SIZE;
-  }
-
-  // 2) Determine placeholder TOP using rendered element rects (scroll-safe)
-  // We try to place it:
-  // - Before the element whose index == dropIndex (if rendered)
-  // - Otherwise after the last rendered element
-  // - If nothing rendered, top = 0
-  let top = 0;
-
-  if (wrappers.length === 0) {
-    top = 0;
-  } else {
-    // Sort wrappers by index for stable behavior
-    wrappers.sort(
-      (a, b) =>
-        parseInt(a.dataset.taskIndex || "0", 10) -
-        parseInt(b.dataset.taskIndex || "0", 10)
-    );
-
-    const beforeEl = wrappers.find(
-      (w) => parseInt(w.dataset.taskIndex || "-1", 10) === dropIndex
-    );
-
-    console.log('beforeEl :>> ', beforeEl);
-
-    if (beforeEl) {
-      const r = beforeEl.getBoundingClientRect();
-      console.log('r.top :>> ', r.top);
-      console.log('containerRect.top :>> ', containerRect.top);
-      top = r.top - containerRect.top;
-      console.log('top :>> ', top);
-    } else {
-      const last = wrappers[wrappers.length - 1];
-      const r = last.getBoundingClientRect();
-      top = r.bottom - containerRect.top;
-      console.log('top :>> ', top);
-    }
-  }
-
-  // Clamp to avoid negative top in edge cases
-  top = Math.max(0, top);
-
-  return {
-    top: `${top}px`,
-    height: `${height}px`,
-  };
+  return MIN_ITEM_SIZE;
 });
 
-// ============ SHIFTING LOGIC (UNCHANGED) ============
-const getShiftDirection = (index) => {
-  if (!dragDrop.isDragging.value) return null;
+// Build the list that the scroller will render
+// This is the key to “perfect linear”.
+const renderItems = computed(() => {
+  const base = props.column.tasks || [];
+  const info = placeholderInfo.value;
 
-  const sourceCol = dragDrop.sourceColumnId.value;
-  const sourceIdx = dragDrop.sourceIndex.value;
-  const targetCol = dragDrop.dropTargetColumnId.value;
-  const thisCol = props.column.id;
+  // no active placeholder for this column
+  if (!info) return base;
 
-  // SOURCE column behavior
-  if (thisCol === sourceCol) {
-    if (!placeholderInfo.value) {
-      if (index > sourceIdx) return "up";
-      return null;
+  const srcId = draggedTaskId.value;
+
+  // Build list in “without dragged” space if same column
+  let list = base.slice();
+  if (info.isSameColumn && srcId) {
+    list = list.filter((t) => t.id !== srcId);
+  }
+
+  // Clamp index in this list’s coordinate space
+  // IMPORTANT: dropTargetIndex should already be “without dragged” for same-column,
+  // BUT many implementations store it in original space.
+  // We normalize here:
+  let dropIndex = info.dropIndexRaw;
+
+  if (
+    info.isSameColumn &&
+    typeof info.sourceIndex === "number" &&
+    dropIndex > info.sourceIndex
+  ) {
+    dropIndex = dropIndex - 1;
+  }
+
+  dropIndex = Math.max(0, Math.min(dropIndex, list.length));
+
+  const placeholderId = `__placeholder__:${props.column.id}`;
+
+  list.splice(dropIndex, 0, {
+    id: placeholderId,
+    isPlaceholder: true,
+  });
+
+  return list;
+});
+
+function getSizeDeps(item) {
+  if (item?.isPlaceholder) return [placeholderHeight.value];
+  return [item.title, item.description, item.priority];
+}
+
+// =====================
+// DROP INDEX CALCULATION
+// =====================
+
+// Convert hover over a specific task into an insertion index
+function computeDropIndexOverTask(event, hoveredTaskId) {
+  const hoveredIndex = taskIndexById.value[hoveredTaskId];
+
+  if (typeof hoveredIndex !== "number") return 0;
+
+  const wrapper = event.currentTarget;
+  const rect = wrapper.getBoundingClientRect();
+
+  const mouseY = event.clientY;
+  const mid = rect.top + rect.height / 2;
+
+  let raw = mouseY < mid ? hoveredIndex : hoveredIndex + 1;
+
+  // Normalize for same-column “without dragged” space
+  if (
+    isSameColumn.value &&
+    typeof dragDrop.sourceIndex.value === "number" &&
+    raw > dragDrop.sourceIndex.value
+  ) {
+    raw = raw - 1;
+  }
+
+  // Clamp in target list length (without dragged if same column)
+  const baseLen = props.column.tasks.length;
+  const withoutDraggedLen =
+    isSameColumn.value && draggedTaskId.value
+      ? baseLen - 1
+      : baseLen;
+
+  return Math.max(0, Math.min(raw, withoutDraggedLen));
+}
+
+// Convert “column empty space” hover into insertion index
+function computeDropIndexInColumn(event) {
+  const container = tasksContainerRef.value;
+  if (!container) return 0;
+
+  const wrappers = Array.from(container.querySelectorAll(".task-wrapper[data-task-id]"));
+
+  // If no rendered tasks, it’s index 0
+  if (wrappers.length === 0) return 0;
+
+  const mouseY = event.clientY;
+
+  // Find first wrapper whose midpoint is below mouse
+  let insertIndex = props.column.tasks.length;
+
+  for (const el of wrappers) {
+    const rect = el.getBoundingClientRect();
+    const id = el.getAttribute("data-task-id");
+    const idx = taskIndexById.value[id];
+
+    if (typeof idx !== "number") continue;
+
+    const mid = rect.top + rect.height / 2;
+
+    if (mouseY < mid) {
+      insertIndex = idx;
+      break;
     }
-
-    const { dropIndex } = placeholderInfo.value;
-
-    if (index === sourceIdx) return null;
-
-    if (dropIndex < sourceIdx) {
-      if (index >= dropIndex && index < sourceIdx) return "down";
-      return null;
-    } else if (dropIndex > sourceIdx) {
-      if (index > sourceIdx && index < dropIndex) return "up";
-      return null;
-    }
-    return null;
   }
 
-  // TARGET column behavior
-  if (thisCol === targetCol && placeholderInfo.value) {
-    const { dropIndex } = placeholderInfo.value;
-    if (index >= dropIndex) return "down";
+  // Normalize for same-column without-dragged space
+  if (
+    isSameColumn.value &&
+    typeof dragDrop.sourceIndex.value === "number" &&
+    insertIndex > dragDrop.sourceIndex.value
+  ) {
+    insertIndex = insertIndex - 1;
   }
 
-  return null;
-};
+  const baseLen = props.column.tasks.length;
+  const withoutDraggedLen =
+    isSameColumn.value && draggedTaskId.value
+      ? baseLen - 1
+      : baseLen;
 
-const getShiftClass = (index) => {
-  const direction = getShiftDirection(index);
-  if (direction === "down") return "is-shifted";
-  if (direction === "up") return "is-shifted-up";
-  return "";
-};
+  return Math.max(0, Math.min(insertIndex, withoutDraggedLen));
+}
 
-const getShiftStyle = (index) => {
-  const direction = getShiftDirection(index);
-  if (!direction) return {};
+// =====================
+// EVENT HANDLERS
+// =====================
 
-  const sourceCol = dragDrop.sourceColumnId.value;
-  const sourceIdx = dragDrop.sourceIndex.value;
-  const thisCol = props.column.id;
-
-  const wrappers =
-    tasksContainerRef.value?.querySelectorAll(".task-wrapper") || [];
-
-  let shiftAmount = MIN_ITEM_SIZE;
-
-  if (thisCol === sourceCol) {
-    const sourceEl = Array.from(wrappers).find(
-      (w) => parseInt(w.dataset.taskIndex || "-1", 10) === sourceIdx
-    );
-    shiftAmount = sourceEl?.offsetHeight || MIN_ITEM_SIZE;
-  } else {
-    shiftAmount = dragDrop.placeholderHeight.value || MIN_ITEM_SIZE;
-  }
-
-  if (direction === "up") return { transform: `translateY(-${shiftAmount}px)` };
-  if (direction === "down") return { transform: `translateY(${shiftAmount}px)` };
-
-  return {};
-};
-
-// ============ EVENT HANDLERS ============
-const handleTaskDragStart = (event, task, index) => {
-  const element = event.target.closest('[draggable="true"]');
+const handleTaskDragStart = (event, task) => {
+  const element = event.target?.closest?.('[draggable="true"]');
   if (!element) {
     event.preventDefault();
     return;
   }
-  dragDrop.handleDragStart(event, task, props.column.id, index, element);
+
+  // Capture height immediately for placeholder sizing
+  // (your composable should store this)
+  dragDrop.handleDragStart(event, task, props.column.id, taskIndexById.value[task.id], element);
 };
 
 const handleTaskDragEnd = () => {
   dragDrop.handleDragEnd();
 };
 
-const handleTaskDragOver = (event, index) => {
-  if (!dragDrop.isDragging.value) return;
+const handleTaskDragOver = (event, hoveredTaskId) => {
+  if (!draggedTaskId.value) return;
   event.stopPropagation();
 
   const now = Date.now();
   if (now - lastDropUpdate.value < DRAG_UPDATE_THROTTLE) return;
 
-  const wrapper = event.currentTarget;
-  const rect = wrapper.getBoundingClientRect();
-  const mouseY = event.clientY;
+  const idx = computeDropIndexOverTask(event, hoveredTaskId);
 
-  const elementHeight = rect.height || 1;
-  const relativeY = mouseY - rect.top;
-  const percentY = relativeY / elementHeight;
-
-  let dropIndex;
-  const currentDropIndex = dragDrop.dropTargetIndex.value;
-  const currentIsAbove = currentDropIndex === index;
-  const currentIsBelow = currentDropIndex === index + 1;
-
-  if (currentIsAbove) {
-    dropIndex = percentY > 0.6 ? index + 1 : index;
-  } else if (currentIsBelow) {
-    dropIndex = percentY < 0.4 ? index : index + 1;
+  // Prefer composable API if available
+  if (typeof dragDrop.handleDragOver === "function") {
+    dragDrop.handleDragOver(event, props.column.id, idx);
   } else {
-    dropIndex = percentY < 0.5 ? index : index + 1;
+    dragDrop.dropTargetColumnId.value = props.column.id;
+    dragDrop.dropTargetIndex.value = idx;
   }
 
-  if (dropIndex !== dragDrop.dropTargetIndex.value) {
-    lastDropUpdate.value = now;
-    dragDrop.handleDragOver(event, props.column.id, dropIndex);
-  }
+  lastDropUpdate.value = now;
 };
 
 const handleColumnDragOver = (event) => {
-  if (!dragDrop.isDragging.value) return;
-  event.preventDefault();
+  if (!draggedTaskId.value) return;
 
-  const mouseY = event.clientY;
-  const container = tasksContainerRef.value;
-  if (!container) return;
-
-  const wrappers = Array.from(
-    container.querySelectorAll(".task-wrapper[data-task-index]")
-  );
-
-  if (wrappers.length === 0) {
-    dragDrop.dropTargetColumnId.value = props.column.id;
-    dragDrop.dropTargetIndex.value = 0;
-    return;
-  }
-
-  // Sort by index for consistency
-  wrappers.sort(
-    (a, b) =>
-      parseInt(a.dataset.taskIndex || "0", 10) -
-      parseInt(b.dataset.taskIndex || "0", 10)
-  );
-
-  let insertIndex = props.column.tasks.length;
-
-  for (const w of wrappers) {
-    const rect = w.getBoundingClientRect();
-    if (rect.height === 0) continue;
-
-    const taskIndex = parseInt(w.dataset.taskIndex || "0", 10);
-    const middle = rect.top + rect.height / 2;
-
-    if (mouseY < middle) {
-      insertIndex = taskIndex;
-      break;
-    }
-  }
+  const idx = computeDropIndexInColumn(event);
 
   dragDrop.dropTargetColumnId.value = props.column.id;
-  dragDrop.dropTargetIndex.value = insertIndex;
+  dragDrop.dropTargetIndex.value = idx;
+};
+
+const handleEmptyColumnDragOver = (event) => {
+  if (!draggedTaskId.value) return;
+  event.preventDefault();
+
+  dragDrop.dropTargetColumnId.value = props.column.id;
+  dragDrop.dropTargetIndex.value = 0;
 };
 
 const handleColumnDrop = (event) => {
@@ -390,19 +348,12 @@ const handleColumnDrop = (event) => {
   });
 };
 
-const handleEmptyColumnDragOver = (event) => {
-  if (!dragDrop.isDragging.value) return;
-  event.preventDefault();
-  dragDrop.dropTargetColumnId.value = props.column.id;
-  dragDrop.dropTargetIndex.value = 0;
-};
-
-// ============ LIFECYCLE ============
+// Escape to cancel
 let escapeHandler = null;
 
 onMounted(() => {
   escapeHandler = (e) => {
-    if (e.key === "Escape" && dragDrop.isDragging.value) {
+    if (e.key === "Escape" && draggedTaskId.value && typeof dragDrop.resetDragState === "function") {
       dragDrop.resetDragState();
     }
   };
@@ -410,9 +361,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  if (escapeHandler) {
-    window.removeEventListener("keydown", escapeHandler);
-  }
+  if (escapeHandler) window.removeEventListener("keydown", escapeHandler);
 });
 
 defineExpose({ scrollerRef });
@@ -466,7 +415,6 @@ defineExpose({ scrollerRef });
   font-weight: 600;
 }
 
-/* Tasks container */
 .tasks-container {
   flex: 1;
   min-height: 0;
@@ -474,55 +422,29 @@ defineExpose({ scrollerRef });
   overflow: hidden;
 }
 
-/* Scroller */
 .tasks-scroller {
   height: 100%;
   overflow-y: auto !important;
   overflow-x: hidden;
-  position: relative;
 }
 
-/* Scrollbar styling */
-.tasks-scroller::-webkit-scrollbar {
-  width: 8px;
-}
-.tasks-scroller::-webkit-scrollbar-track {
-  background: rgba(71, 85, 105, 0.2);
-  border-radius: 4px;
-}
-.tasks-scroller::-webkit-scrollbar-thumb {
-  background: rgba(71, 85, 105, 0.6);
-  border-radius: 4px;
-}
-.tasks-scroller::-webkit-scrollbar-thumb:hover {
-  background: rgba(71, 85, 105, 0.8);
-}
-
-/* Task wrapper */
 .task-wrapper {
   padding: 4px 6px;
-  transition: transform 200ms cubic-bezier(0.2, 0, 0, 1), opacity 150ms ease;
-  will-change: transform;
-  position: relative;
 }
 
-/* Source task invisible */
-.task-wrapper.is-dragging-source {
-  opacity: 0;
+/* Placeholder item wrapper: reserve space naturally via real height */
+.placeholder-wrapper {
   pointer-events: none;
 }
 
-/* Floating placeholder */
+/* Visual placeholder */
 .floating-placeholder {
-  position: absolute;
-  left: 6px;
-  right: 6px;
-  z-index: 10;
+  height: 100%;
   border: 2px dashed rgba(99, 102, 241, 0.8);
   border-radius: 8px;
   background: rgba(99, 102, 241, 0.15);
-  pointer-events: none;
   overflow: hidden;
+  position: relative;
 }
 
 .placeholder-inner {
