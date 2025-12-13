@@ -15,6 +15,7 @@
       <DynamicScroller
         ref="scrollerRef"
         class="tasks-scroller"
+        :class="{ 'is-reordering': isDragging }"
         :items="renderItems"
         :min-item-size="MIN_ITEM_SIZE"
         key-field="id"
@@ -33,9 +34,7 @@
               class="task-wrapper placeholder-wrapper"
               :style="{ height: `${placeholderHeight}px` }"
             >
-              <div class="floating-placeholder">
-                <div class="placeholder-inner"></div>
-              </div>
+              <div class="floating-placeholder"></div>
             </div>
 
             <!-- GHOST (invisible dragged task keeping its space) -->
@@ -71,9 +70,7 @@
         class="empty-drop-zone"
         @dragover.prevent="handleEmptyColumnDragOver"
       >
-        <div v-if="isDropTarget" class="empty-placeholder" :style="{ height: `${placeholderHeight}px` }">
-          <div class="placeholder-inner"></div>
-        </div>
+        <div v-if="isDropTarget" class="empty-placeholder" :style="{ height: `${placeholderHeight}px` }"></div>
         <div v-else class="empty-state">
           <span class="empty-icon">📋</span>
           <span>Drop tasks here</span>
@@ -110,8 +107,12 @@ const DRAG_UPDATE_THROTTLE = 16;
 // COMPUTED HELPERS
 // =====================
 
+const isDragging = computed(() => {
+  return !!dragDrop?.isDragging?.value;
+});
+
 const isDropTarget = computed(() => {
-  return dragDrop?.isDragging?.value && dragDrop?.dropTargetColumnId?.value === props.column.id;
+  return isDragging.value && dragDrop?.dropTargetColumnId?.value === props.column.id;
 });
 
 const isSourceColumn = computed(() => {
@@ -466,63 +467,65 @@ defineExpose({ scrollerRef });
   overflow-x: hidden;
 }
 
+/* ==========================================
+   TASK SWAP ANIMATIONS
+   
+   When dragging, tasks smoothly animate to 
+   fill gaps as the placeholder moves.
+   ========================================== */
+
+/* Animate scroller item positions during drag */
+.tasks-scroller.is-reordering :deep(.vue-recycle-scroller__item-view) {
+  transition: transform 0.15s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+/* ==========================================
+   TASK WRAPPER
+   ========================================== */
 .task-wrapper {
   padding: 4px 6px;
 }
 
-/* Placeholder - visible drop indicator */
+/* ==========================================
+   PLACEHOLDER - Simple, no animation
+   ========================================== */
 .placeholder-wrapper {
+  padding: 4px 6px;
   pointer-events: none;
 }
 
 .floating-placeholder {
   height: 100%;
-  border: 2px dashed rgba(99, 102, 241, 0.8);
+  border: 2px dashed rgba(99, 102, 241, 0.5);
   border-radius: 8px;
-  background: rgba(99, 102, 241, 0.15);
-  overflow: hidden;
-  position: relative;
+  background: rgba(99, 102, 241, 0.08);
 }
 
-.placeholder-inner {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(99, 102, 241, 0.3) 50%,
-    transparent 100%
-  );
-  animation: shimmer 1.5s ease-in-out infinite;
-}
-
-@keyframes shimmer {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
-}
-
-/* Ghost - invisible spacer */
+/* ==========================================
+   GHOST - Invisible spacer
+   ========================================== */
 .ghost-wrapper {
   pointer-events: none;
   opacity: 0;
 }
 
-/* Empty column */
+/* ==========================================
+   EMPTY COLUMN
+   ========================================== */
 .empty-drop-zone {
   flex: 1;
   min-height: 100px;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 12px;
 }
 
 .empty-placeholder {
   width: 100%;
-  border: 2px dashed rgba(99, 102, 241, 0.8);
+  border: 2px dashed rgba(99, 102, 241, 0.5);
   border-radius: 8px;
-  background: rgba(99, 102, 241, 0.1);
-  position: relative;
-  overflow: hidden;
+  background: rgba(99, 102, 241, 0.08);
 }
 
 .empty-state {

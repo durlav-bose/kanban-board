@@ -36,7 +36,6 @@ defineEmits(['dragstart', 'dragend'])
 
 <style scoped>
 .task {
-  /* Allow dynamic height based on content */
   min-height: 80px;
   height: auto;
   box-sizing: border-box;
@@ -49,19 +48,32 @@ defineEmits(['dragstart', 'dragend'])
   user-select: none;
   display: flex;
   flex-direction: column;
-  transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+  
+  /* Smooth transitions for all interactive states */
+  transition: 
+    transform 0.2s cubic-bezier(0.2, 0, 0, 1),
+    box-shadow 0.2s cubic-bezier(0.2, 0, 0, 1),
+    border-color 0.2s ease,
+    background 0.2s ease;
 }
 
+/* Hover - subtle lift effect */
 .task:hover {
-  border-color: #6366f1;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+  border-color: rgba(99, 102, 241, 0.5);
+  box-shadow: 
+    0 4px 12px rgba(0, 0, 0, 0.25),
+    0 0 0 1px rgba(99, 102, 241, 0.1);
   transform: translateY(-1px);
 }
 
+/* Active/Grabbing - slight scale for feedback */
 .task:active {
   cursor: grabbing;
-  transform: scale(1.02);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+  transform: scale(1.01);
+  box-shadow: 
+    0 8px 25px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(99, 102, 241, 0.2);
+  border-color: rgba(99, 102, 241, 0.6);
 }
 
 .task-content {
@@ -96,6 +108,11 @@ defineEmits(['dragstart', 'dragend'])
   text-transform: uppercase;
   letter-spacing: 0.5px;
   flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.task:hover .task-priority {
+  transform: scale(1.05);
 }
 
 .priority-high {
