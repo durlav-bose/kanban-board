@@ -48,7 +48,7 @@ export function useKanbanDragDrop() {
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData('text/plain', task.id)
 
-    // Custom drag image (tilted card effect)
+    // Custom drag image (fully visible with smooth pickup feel)
     if (element) {
       const rect = element.getBoundingClientRect()
       const clone = element.cloneNode(true)
@@ -58,12 +58,15 @@ export function useKanbanDragDrop() {
         top: -9999px;
         left: -9999px;
         width: ${rect.width}px;
-        opacity: 0.95;
-        transform: rotate(3deg);
-        box-shadow: 0 15px 35px rgba(0,0,0,0.5);
-        border-radius: 8px;
+        opacity: 1;
+        // transform: rotate(50deg) scale(1.03);
+        // box-shadow: 0 20px 50px rgba(0,0,0,0.7);
+        border-radius: 7px;
         pointer-events: none;
         z-index: 10000;
+        background: #22232F;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        // transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1);
       `
       
       document.body.appendChild(clone)

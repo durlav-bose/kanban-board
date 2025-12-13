@@ -408,15 +408,13 @@ defineExpose({ scrollerRef });
 
 <style scoped>
 .task-column {
-  background: rgba(30, 41, 59, 0.95);
-  backdrop-filter: blur(10px);
-  border-radius: 12px;
-  padding: 16px;
-  width: 320px;
-  min-width: 320px;
-  max-width: 320px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(71, 85, 105, 0.5);
+  background: #181921;
+  border-radius: 7px;
+  padding: 8px;
+  width: 400px;
+  min-width: 400px;
+  max-width: 400px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
   display: flex;
   flex-direction: column;
   height: calc(100vh - 180px);
@@ -436,18 +434,18 @@ defineExpose({ scrollerRef });
   padding-bottom: 12px;
   border-bottom: 1px solid rgba(71, 85, 105, 0.5);
   flex-shrink: 0;
+  padding: 4px 6px;
 }
 
 .column-header h2 {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: #e2e8f0;
+  font-size: 16px;
+  font-weight: 500;
+  color: #ffffff;
   margin: 0;
 }
 
 .task-count {
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-  color: white;
+  color: #94a3b8;
   padding: 4px 10px;
   border-radius: 10px;
   font-size: 0.8rem;
@@ -467,6 +465,25 @@ defineExpose({ scrollerRef });
   overflow-x: hidden;
 }
 
+/* Professional scrollbar for tasks */
+.tasks-scroller::-webkit-scrollbar {
+  width: 6px;
+}
+
+.tasks-scroller::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tasks-scroller::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  transition: background 0.2s ease;
+}
+
+.tasks-scroller::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
 /* ==========================================
    TASK SWAP ANIMATIONS
    
@@ -476,7 +493,7 @@ defineExpose({ scrollerRef });
 
 /* Animate scroller item positions during drag */
 .tasks-scroller.is-reordering :deep(.vue-recycle-scroller__item-view) {
-  transition: transform 0.15s cubic-bezier(0.25, 0.1, 0.25, 1);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* ==========================================
@@ -496,9 +513,14 @@ defineExpose({ scrollerRef });
 
 .floating-placeholder {
   height: 100%;
-  border: 2px dashed rgba(99, 102, 241, 0.5);
+  border: 2px solid #22232F;
   border-radius: 8px;
-  background: rgba(99, 102, 241, 0.08);
+  background: #1a1b24;
+}
+
+/* Prevent placeholder from being affected by transform animations */
+.tasks-scroller.is-reordering :deep(.vue-recycle-scroller__item-view.placeholder-wrapper) {
+  transition: none !important;
 }
 
 /* ==========================================
@@ -523,9 +545,9 @@ defineExpose({ scrollerRef });
 
 .empty-placeholder {
   width: 100%;
-  border: 2px dashed rgba(99, 102, 241, 0.5);
+  border: 2px solid #22232F;
   border-radius: 8px;
-  background: rgba(99, 102, 241, 0.08);
+  background: #1a1b24;
 }
 
 .empty-state {

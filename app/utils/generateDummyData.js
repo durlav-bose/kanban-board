@@ -87,22 +87,22 @@ export function generateDummyData(tasksPerColumn = 150) {
   const columns = [
     {
       id: 'todo',
-      title: '📝 To Do',
+      title: 'Todo',
       tasks: []
     },
     {
       id: 'in-progress',
-      title: '🚀 In Progress',
+      title: 'In Progress',
       tasks: []
     },
     {
       id: 'review',
-      title: '👀 Review',
+      title: 'Review',
       tasks: []
     },
     {
       id: 'done',
-      title: '✅ Done',
+      title: 'Done',
       tasks: []
     }
   ];

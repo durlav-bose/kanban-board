@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="board-header">
-      <h1>📋 Kanban Board - Linear Style</h1>
+      <h1>Kanban Board</h1>
     </div>
     
     <div class="container" ref="boardContainer">
@@ -115,8 +115,8 @@ const handleTaskMove = ({ task, sourceColumnId, sourceColumnIndex, targetColumnI
 .board-header {
   text-align: center;
   padding: 30px 20px;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%);
-  border-bottom: 2px solid rgba(71, 85, 105, 0.5);
+  background: #191A23;
+  border-bottom: 1px solid rgba(46, 48, 49, 0.5);
   margin-bottom: 20px;
 }
 
@@ -135,25 +135,26 @@ const handleTaskMove = ({ task, sourceColumnId, sourceColumnIndex, targetColumnI
   overflow-y: hidden;
   min-height: calc(100vh - 150px);
   align-items: flex-start;
+  background: #191A23;
 }
 
+/* Professional scrollbar styling */
 .container::-webkit-scrollbar {
-  height: 8px;
+  height: 6px;
 }
 
 .container::-webkit-scrollbar-track {
-  background: rgba(71, 85, 105, 0.3);
-  border-radius: 4px;
+  background: transparent;
 }
 
 .container::-webkit-scrollbar-thumb {
-  background: #475569;
-  border-radius: 4px;
-  transition: background 0.2s;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  transition: background 0.2s ease;
 }
 
 .container::-webkit-scrollbar-thumb:hover {
-  background: #64748b;
+  background: rgba(255, 255, 255, 0.15);
 }
 
 /* Global dragging styles */

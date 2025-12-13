@@ -39,41 +39,32 @@ defineEmits(['dragstart', 'dragend'])
   min-height: 80px;
   height: auto;
   box-sizing: border-box;
-  background: linear-gradient(135deg, #334155 0%, #1e293b 100%);
-  border: 1px solid #475569;
-  border-radius: 8px;
+  background: #22232F;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 7px;
   padding: 12px;
   cursor: grab;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   user-select: none;
   display: flex;
   flex-direction: column;
   
   /* Smooth transitions for all interactive states */
-  transition: 
-    transform 0.2s cubic-bezier(0.2, 0, 0, 1),
-    box-shadow 0.2s cubic-bezier(0.2, 0, 0, 1),
-    border-color 0.2s ease,
-    background 0.2s ease;
+  transition: background 0.2s ease;
 }
 
 /* Hover - subtle lift effect */
 .task:hover {
-  border-color: rgba(99, 102, 241, 0.5);
-  box-shadow: 
-    0 4px 12px rgba(0, 0, 0, 0.25),
-    0 0 0 1px rgba(99, 102, 241, 0.1);
-  transform: translateY(-1px);
+  background: #262735;
 }
 
-/* Active/Grabbing - slight scale for feedback */
+/* Active/Grabbing - make task fully visible when dragging */
 .task:active {
   cursor: grabbing;
-  transform: scale(1.01);
-  box-shadow: 
-    0 8px 25px rgba(0, 0, 0, 0.35),
-    0 0 0 1px rgba(99, 102, 241, 0.2);
-  border-color: rgba(99, 102, 241, 0.6);
+  border-color: rgba(255, 255, 255, 0.15);
+  background: #22232F;
+  opacity: 1 !important;
+  z-index: 10000;
 }
 
 .task-content {
@@ -131,6 +122,12 @@ defineEmits(['dragstart', 'dragend'])
   background: rgba(34, 197, 94, 0.2);
   color: #86efac;
   border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.priority-critical {
+  background: rgba(220, 38, 38, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(220, 38, 38, 0.3);
 }
 
 .task-description {
