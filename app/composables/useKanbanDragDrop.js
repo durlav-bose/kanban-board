@@ -1,22 +1,27 @@
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 
 /**
- * Kanban Drag & Drop Composable
+ * Kanban Drag & Drop Composable - Linear Style
  * 
- * Simple and reliable implementation:
- * - Source task becomes invisible (opacity: 0)
- * - Floating placeholder shows drop position
- * - Tasks shift down via CSS class
+ * Key insight: Linear doesn't actually reorder the DOM during drag.
+ * Instead, it uses CSS transforms to visually shift items, creating
+ * the illusion of smooth reordering.
+ * 
+ * How it works:
+ * 1. Dragged task becomes invisible (opacity: 0) but stays in DOM
+ * 2. A floating placeholder shows the drop target position
+ * 3. Tasks between source and target shift up/down via CSS transforms
+ * 4. On drop, actual array reorder happens and transforms reset
  */
 export function useKanbanDragDrop() {
-  // Drag state
+  // ============ STATE ============
   const isDragging = ref(false)
   const draggedTask = ref(null)
   const sourceColumnId = ref(null)
   const sourceIndex = ref(null)
   const placeholderHeight = ref(80)
 
-  // Drop target
+  // Current drop target (where placeholder shows)
   const dropTargetColumnId = ref(null)
   const dropTargetIndex = ref(null)
 
@@ -24,23 +29,26 @@ export function useKanbanDragDrop() {
   const handleDragStart = (event, task, columnId, index, element) => {
     console.log('[DRAG START]', task.title, 'from', columnId, 'index', index)
 
-    // Store drag data
+    // Store source info
     draggedTask.value = { ...task }
     sourceColumnId.value = columnId
     sourceIndex.value = index
+    
+    // Initially, drop target is same as source
     dropTargetColumnId.value = columnId
     dropTargetIndex.value = index
 
-    // Get element height
+    // Capture element height for placeholder
     if (element) {
-      placeholderHeight.value = element.getBoundingClientRect().height
+      const rect = element.getBoundingClientRect()
+      placeholderHeight.value = rect.height
     }
 
-    // Set drag data
+    // Configure drag
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData('text/plain', task.id)
 
-    // Custom drag image
+    // Custom drag image (tilted card effect)
     if (element) {
       const rect = element.getBoundingClientRect()
       const clone = element.cloneNode(true)
@@ -50,23 +58,24 @@ export function useKanbanDragDrop() {
         top: -9999px;
         left: -9999px;
         width: ${rect.width}px;
-        opacity: 0.9;
-        transform: rotate(2deg);
-        box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+        opacity: 0.95;
+        transform: rotate(3deg);
+        box-shadow: 0 15px 35px rgba(0,0,0,0.5);
         border-radius: 8px;
         pointer-events: none;
+        z-index: 10000;
       `
       
       document.body.appendChild(clone)
       event.dataTransfer.setDragImage(clone, event.clientX - rect.left, event.clientY - rect.top)
       
-      setTimeout(() => clone.remove(), 0)
+      requestAnimationFrame(() => clone.remove())
     }
 
-    // Delay state change to allow drag to start
+    // Delay state to allow drag image to render
     requestAnimationFrame(() => {
       isDragging.value = true
-      document.body.style.cursor = 'grabbing'
+      document.body.classList.add('is-dragging')
     })
   }
 
@@ -77,6 +86,7 @@ export function useKanbanDragDrop() {
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
 
+    // Only update if changed (prevents excessive reactivity)
     if (dropTargetColumnId.value !== columnId || dropTargetIndex.value !== taskIndex) {
       dropTargetColumnId.value = columnId
       dropTargetIndex.value = taskIndex
@@ -90,7 +100,7 @@ export function useKanbanDragDrop() {
     event.preventDefault()
 
     const targetCol = dropTargetColumnId.value || columnId
-    let targetIdx = dropTargetIndex.value ?? 0
+    const targetIdx = dropTargetIndex.value ?? 0
     const srcCol = sourceColumnId.value
     const srcIdx = sourceIndex.value
 
@@ -98,18 +108,14 @@ export function useKanbanDragDrop() {
     console.log('  From:', srcCol, 'index', srcIdx)
     console.log('  To:', targetCol, 'index', targetIdx)
 
-    // targetIdx is already in "visual space" (without dragged task) from computeDropIndexOverTask
-    // No need to adjust here
-    const finalIdx = Math.max(0, targetIdx)
-    console.log('  Final index:', finalIdx)
-
+    // Call the move handler
     if (onMove) {
       onMove({
         task: draggedTask.value,
         sourceColumnId: srcCol,
         sourceColumnIndex: srcIdx,
         targetColumnId: targetCol,
-        targetIndex: finalIdx
+        targetIndex: targetIdx
       })
     }
 
@@ -130,7 +136,71 @@ export function useKanbanDragDrop() {
     sourceIndex.value = null
     dropTargetColumnId.value = null
     dropTargetIndex.value = null
-    document.body.style.cursor = ''
+    document.body.classList.remove('is-dragging')
+  }
+
+  // ============ HELPER: Calculate transform for a task ============
+  /**
+   * For Linear-style visual shifting:
+   * - Tasks between source and target need to shift to "make room"
+   * - If target > source: tasks in between shift UP (negative Y)
+   * - If target < source: tasks in between shift DOWN (positive Y)
+   */
+  const getTaskTransform = (columnId, taskIndex, taskHeight) => {
+    if (!isDragging.value) return null
+    if (!draggedTask.value) return null
+    
+    const srcCol = sourceColumnId.value
+    const srcIdx = sourceIndex.value
+    const tgtCol = dropTargetColumnId.value
+    const tgtIdx = dropTargetIndex.value
+
+    // Same column drag - apply transforms to tasks between source and target
+    if (srcCol === columnId && tgtCol === columnId) {
+      if (srcIdx === tgtIdx) return null // No movement needed
+      
+      const height = taskHeight || placeholderHeight.value
+      
+      if (tgtIdx > srcIdx) {
+        // Dragging DOWN: tasks between (srcIdx, tgtIdx] shift UP
+        if (taskIndex > srcIdx && taskIndex <= tgtIdx) {
+          return { transform: `translateY(-${height}px)` }
+        }
+      } else {
+        // Dragging UP: tasks between [tgtIdx, srcIdx) shift DOWN
+        if (taskIndex >= tgtIdx && taskIndex < srcIdx) {
+          return { transform: `translateY(${height}px)` }
+        }
+      }
+    }
+    
+    // Cross-column drag
+    if (srcCol === columnId && tgtCol !== columnId) {
+      // Source column: tasks after source shift UP to fill gap
+      if (taskIndex > srcIdx) {
+        return { transform: `translateY(-${placeholderHeight.value}px)` }
+      }
+    }
+    
+    if (tgtCol === columnId && srcCol !== columnId) {
+      // Target column: tasks at/after target shift DOWN to make room
+      if (taskIndex >= tgtIdx) {
+        return { transform: `translateY(${placeholderHeight.value}px)` }
+      }
+    }
+
+    return null
+  }
+
+  // ============ HELPER: Check if task is the dragged one ============
+  const isDraggedTask = (taskId) => {
+    return isDragging.value && draggedTask.value?.id === taskId
+  }
+
+  // ============ HELPER: Should show placeholder at position ============
+  const shouldShowPlaceholder = (columnId, index) => {
+    if (!isDragging.value) return false
+    return dropTargetColumnId.value === columnId && dropTargetIndex.value === index
   }
 
   return {
@@ -149,5 +219,10 @@ export function useKanbanDragDrop() {
     handleDrop,
     handleDragEnd,
     resetDragState,
+    
+    // Helpers for Linear-style transforms
+    getTaskTransform,
+    isDraggedTask,
+    shouldShowPlaceholder,
   }
 }

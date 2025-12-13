@@ -44,13 +44,19 @@ const setColumnRef = (columnId, el) => {
 const columns = ref(generateDummyData(150))
 
 
-// Handle task movement
+/**
+ * Handle task movement
+ * 
+ * IMPORTANT: The targetIndex from the column is in "filtered space"
+ * - For same-column drags: index assumes dragged task is removed
+ * - For cross-column drags: index is direct position in target
+ */
 const handleTaskMove = ({ task, sourceColumnId, sourceColumnIndex, targetColumnId, targetIndex }) => {
-  // console.log('[BOARD] Moving task:', {
-  //   task: task.title,
-  //   from: `${sourceColumnId}[${sourceColumnIndex}]`,
-  //   to: `${targetColumnId}[${targetIndex}]`
-  // })
+  console.log('[BOARD] Moving task:', {
+    task: task.title,
+    from: `${sourceColumnId}[${sourceColumnIndex}]`,
+    to: `${targetColumnId}[${targetIndex}]`
+  })
   
   const sourceColumn = columns.value.find(col => col.id === sourceColumnId)
   const targetColumn = columns.value.find(col => col.id === targetColumnId)
@@ -61,19 +67,31 @@ const handleTaskMove = ({ task, sourceColumnId, sourceColumnIndex, targetColumnI
   }
   
   if (sourceColumnId === targetColumnId) {
-    // Same column move
+    // ========== SAME COLUMN MOVE ==========
+    // targetIndex is in "filtered space" (as if dragged task doesn't exist)
+    // We need to convert it back to actual array position
+    
     const newTasks = [...sourceColumn.tasks]
+    
+    // Remove from source position
     const [movedTask] = newTasks.splice(sourceColumnIndex, 1)
     
-    // targetIndex is already in the filtered list context
-    // so we can insert directly
+    // targetIndex is already correct for the filtered array
+    // (where the task has been removed)
     const clampedIndex = Math.max(0, Math.min(targetIndex, newTasks.length))
     newTasks.splice(clampedIndex, 0, movedTask)
+    
     sourceColumn.tasks = newTasks
     
-    console.log('[BOARD] Same column move complete. New order:', newTasks.slice(0, 5).map(t => t.title))
+    console.log('[BOARD] Same column move complete:', {
+      fromIndex: sourceColumnIndex,
+      toIndex: clampedIndex,
+      newOrder: newTasks.slice(0, 5).map(t => t.title)
+    })
   } else {
-    // Cross-column move
+    // ========== CROSS-COLUMN MOVE ==========
+    // targetIndex is direct position in target column
+    
     const sourceNewTasks = [...sourceColumn.tasks]
     const [movedTask] = sourceNewTasks.splice(sourceColumnIndex, 1)
     
@@ -84,7 +102,11 @@ const handleTaskMove = ({ task, sourceColumnId, sourceColumnIndex, targetColumnI
     sourceColumn.tasks = sourceNewTasks
     targetColumn.tasks = targetNewTasks
     
-    console.log('[BOARD] Cross-column move complete')
+    console.log('[BOARD] Cross-column move complete:', {
+      fromColumn: sourceColumnId,
+      toColumn: targetColumnId,
+      toIndex: clampedIndex
+    })
   }
 }
 </script>

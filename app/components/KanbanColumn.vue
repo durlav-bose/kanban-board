@@ -27,25 +27,33 @@
             :size-dependencies="getSizeDeps(item)"
             :data-index="index"
           >
-            <!-- PLACEHOLDER ITEM (real list item) -->
+            <!-- PLACEHOLDER -->
             <div
               v-if="item.isPlaceholder"
               class="task-wrapper placeholder-wrapper"
               :style="{ height: `${placeholderHeight}px` }"
-              data-placeholder="true"
             >
               <div class="floating-placeholder">
                 <div class="placeholder-inner"></div>
               </div>
             </div>
 
-            <!-- REAL TASK ITEM -->
+            <!-- GHOST (invisible dragged task keeping its space) -->
+            <div
+              v-else-if="item.isGhost"
+              class="task-wrapper ghost-wrapper"
+              :style="{ height: `${placeholderHeight}px` }"
+            >
+              <!-- Empty - just reserves space that collapses when not needed -->
+            </div>
+
+            <!-- REAL TASK -->
             <div
               v-else
               class="task-wrapper"
               :data-task-id="item.id"
-              :data-task-index="taskIndexById[item.id]"
-              @dragover.prevent.stop="handleTaskDragOver($event, item.id)"
+              :data-original-index="originalIndexById[item.id]"
+              @dragover.prevent.stop="handleTaskDragOver($event, item)"
             >
               <KanbanTask
                 :task="item"
@@ -63,7 +71,7 @@
         class="empty-drop-zone"
         @dragover.prevent="handleEmptyColumnDragOver"
       >
-        <div v-if="isDropTarget" class="empty-placeholder">
+        <div v-if="isDropTarget" class="empty-placeholder" :style="{ height: `${placeholderHeight}px` }">
           <div class="placeholder-inner"></div>
         </div>
         <div v-else class="empty-state">
@@ -94,28 +102,30 @@ const dragDrop = inject("kanbanDragDrop");
 const scrollerRef = ref(null);
 const tasksContainerRef = ref(null);
 
-// Small throttle to reduce jitter in very tall items
+// Throttle for drag updates
 const lastDropUpdate = ref(0);
 const DRAG_UPDATE_THROTTLE = 16;
 
 // =====================
-// DERIVED / COMPUTED
+// COMPUTED HELPERS
 // =====================
 
 const isDropTarget = computed(() => {
-  return (
-    !!dragDrop?.draggedTask?.value &&
-    dragDrop.dropTargetColumnId.value === props.column.id
-  );
+  return dragDrop?.isDragging?.value && dragDrop?.dropTargetColumnId?.value === props.column.id;
 });
 
-const isSameColumn = computed(() => {
+const isSourceColumn = computed(() => {
   return dragDrop?.sourceColumnId?.value === props.column.id;
 });
 
 const draggedTaskId = computed(() => dragDrop?.draggedTask?.value?.id || null);
 
-const taskIndexById = computed(() => {
+const placeholderHeight = computed(() => {
+  return dragDrop?.placeholderHeight?.value || MIN_ITEM_SIZE;
+});
+
+// Map task ID -> original index in column.tasks
+const originalIndexById = computed(() => {
   const map = Object.create(null);
   for (let i = 0; i < props.column.tasks.length; i++) {
     map[props.column.tasks[i].id] = i;
@@ -123,70 +133,82 @@ const taskIndexById = computed(() => {
   return map;
 });
 
-// Info needed to decide whether placeholder is shown in this column
-const placeholderInfo = computed(() => {
-  if (!draggedTaskId.value) return null;
-  if (dragDrop.dropTargetColumnId.value !== props.column.id) return null;
-  if (dragDrop.dropTargetIndex.value === null || dragDrop.dropTargetIndex.value === undefined) return null;
+// =====================
+// RENDER ITEMS - THE MAGIC
+// =====================
+// 
+// Linear-style behavior:
+// 1. Remove the dragged task from its original position
+// 2. Insert a placeholder at the drop target position
+// 3. The scroller handles smooth reflow naturally
+//
+// For same-column drags:
+//   - Remove task from source index
+//   - Insert placeholder at target index (in the filtered list)
+//
+// For cross-column drags:
+//   - Source column: Just filter out the dragged task (or show ghost)
+//   - Target column: Insert placeholder at target index
 
-  const dropIdx = dragDrop.dropTargetIndex.value;
-  const srcIdx = dragDrop.sourceIndex.value;
-  const same = isSameColumn.value;
-
-  // In same column: if drop target equals source position, no placeholder needed
-  if (same && typeof srcIdx === "number" && dropIdx === srcIdx) return null;
-
-  return {
-    dropIndexRaw: dropIdx,         // might be in original index space
-    sourceIndex: srcIdx,
-    isSameColumn: same,
-  };
-});
-
-// The placeholder’s visual height
-const placeholderHeight = computed(() => {
-  // Prefer the height captured on dragStart
-  const h = dragDrop?.placeholderHeight?.value;
-  if (h && Number(h) > 0) return Number(h);
-
-  return MIN_ITEM_SIZE;
-});
-
-// Build the list that the scroller will render
-// This is the key to “perfect linear”.
 const renderItems = computed(() => {
-  const base = props.column.tasks || [];
-  const info = placeholderInfo.value;
-
-  // no active placeholder for this column
-  if (!info) return base;
-
-  const srcId = draggedTaskId.value;
-
-  // Build list in “without dragged” space if same column
-  let list = base.slice();
-  if (info.isSameColumn && srcId) {
-    list = list.filter((t) => t.id !== srcId);
+  const tasks = props.column.tasks;
+  const isDragging = dragDrop?.isDragging?.value;
+  
+  if (!isDragging || !draggedTaskId.value) {
+    return tasks;
   }
 
-  // The dropIndexRaw is already in "without dragged" space from computeDropIndexOverTask
-  // No need to normalize again
-  let dropIndex = info.dropIndexRaw;
+  const srcCol = dragDrop.sourceColumnId.value;
+  const tgtCol = dragDrop.dropTargetColumnId.value;
+  const srcIdx = dragDrop.sourceIndex.value;
+  const tgtIdx = dragDrop.dropTargetIndex.value;
+  const dragId = draggedTaskId.value;
 
-  dropIndex = Math.max(0, Math.min(dropIndex, list.length));
+  // === SAME COLUMN DRAG ===
+  if (srcCol === props.column.id && tgtCol === props.column.id) {
+    // Remove the dragged task and insert placeholder at new position
+    const filtered = tasks.filter(t => t.id !== dragId);
+    
+    // Clamp target index to valid range
+    const insertAt = Math.max(0, Math.min(tgtIdx, filtered.length));
+    
+    // Insert placeholder
+    const result = [...filtered];
+    result.splice(insertAt, 0, {
+      id: `__placeholder__${props.column.id}`,
+      isPlaceholder: true
+    });
+    
+    return result;
+  }
 
-  const placeholderId = `__placeholder__:${props.column.id}`;
+  // === SOURCE COLUMN (cross-column drag) ===
+  if (srcCol === props.column.id && tgtCol !== props.column.id) {
+    // Just filter out the dragged task - it's "gone" from this column
+    return tasks.filter(t => t.id !== dragId);
+  }
 
-  list.splice(dropIndex, 0, {
-    id: placeholderId,
-    isPlaceholder: true,
-  });
+  // === TARGET COLUMN (cross-column drag) ===
+  if (tgtCol === props.column.id && srcCol !== props.column.id) {
+    // Insert placeholder at target position
+    const insertAt = Math.max(0, Math.min(tgtIdx, tasks.length));
+    
+    const result = [...tasks];
+    result.splice(insertAt, 0, {
+      id: `__placeholder__${props.column.id}`,
+      isPlaceholder: true
+    });
+    
+    return result;
+  }
 
-  return list;
+  // Not involved in current drag
+  return tasks;
 });
 
 function getSizeDeps(item) {
   if (item?.isPlaceholder) return [placeholderHeight.value];
+  if (item?.isGhost) return [placeholderHeight.value];
   return [item.title, item.description, item.priority];
 }
 
@@ -194,88 +216,119 @@ function getSizeDeps(item) {
 // DROP INDEX CALCULATION
 // =====================
 
-// Convert hover over a specific task into an insertion index
-function computeDropIndexOverTask(event, hoveredTaskId) {
-  const hoveredIndex = taskIndexById.value[hoveredTaskId];
+/**
+ * Calculate drop index when hovering over a task.
+ * 
+ * The key insight: we need to calculate the index in terms of the ORIGINAL
+ * task list (column.tasks), not the rendered list. This is because:
+ * 1. The drop handler uses original indices
+ * 2. The renderItems computed will handle the visual transformation
+ */
+function computeDropIndex(event, hoveredTask) {
+  // Get original index of hovered task
+  const hoveredOriginalIndex = originalIndexById.value[hoveredTask.id];
+  if (hoveredOriginalIndex === undefined) return 0;
 
-  if (typeof hoveredIndex !== "number") return 0;
-
+  // Get mouse position relative to task
   const wrapper = event.currentTarget;
   const rect = wrapper.getBoundingClientRect();
-
   const mouseY = event.clientY;
-  const mid = rect.top + rect.height / 2;
+  const midpoint = rect.top + rect.height / 2;
+  
+  // Above midpoint = insert before, below = insert after
+  const insertAfter = mouseY >= midpoint;
+  
+  const srcCol = dragDrop.sourceColumnId.value;
+  const srcIdx = dragDrop.sourceIndex.value;
+  const dragId = draggedTaskId.value;
 
-  let raw = mouseY < mid ? hoveredIndex : hoveredIndex + 1;
-
-  // Normalize for same-column "without dragged" space
-  if (
-    isSameColumn.value &&
-    typeof dragDrop.sourceIndex.value === "number"
-  ) {
-    const sourceIdx = dragDrop.sourceIndex.value;
-    // Only adjust if not hovering source task itself AND raw is after source
-    if (hoveredIndex !== sourceIdx && raw > sourceIdx) {
-      raw = raw - 1;
+  // === SAME COLUMN ===
+  if (srcCol === props.column.id) {
+    // We're calculating index in "without dragged task" space
+    // because that's what renderItems uses
+    
+    // If hovering over the dragged task itself (shouldn't happen but safety)
+    if (hoveredTask.id === dragId) {
+      return dragDrop.dropTargetIndex.value ?? srcIdx;
     }
+    
+    // Determine the index in filtered space
+    let targetInFilteredSpace;
+    
+    if (hoveredOriginalIndex < srcIdx) {
+      // Hovered task is BEFORE source - its filtered index = original index
+      targetInFilteredSpace = insertAfter ? hoveredOriginalIndex + 1 : hoveredOriginalIndex;
+    } else {
+      // Hovered task is AFTER source - its filtered index = original index - 1
+      const filteredIdx = hoveredOriginalIndex - 1;
+      targetInFilteredSpace = insertAfter ? filteredIdx + 1 : filteredIdx;
+    }
+    
+    // Clamp
+    const maxIdx = props.column.tasks.length - 1; // -1 because dragged is removed
+    return Math.max(0, Math.min(targetInFilteredSpace, maxIdx));
   }
 
-  // Clamp in target list length (without dragged if same column)
-  const baseLen = props.column.tasks.length;
-  const withoutDraggedLen =
-    isSameColumn.value && draggedTaskId.value
-      ? baseLen - 1
-      : baseLen;
-
-  return Math.max(0, Math.min(raw, withoutDraggedLen));
+  // === DIFFERENT COLUMN (this is target) ===
+  // Simple: just use original index directly
+  let targetIdx = insertAfter ? hoveredOriginalIndex + 1 : hoveredOriginalIndex;
+  return Math.max(0, Math.min(targetIdx, props.column.tasks.length));
 }
 
-// Convert “column empty space” hover into insertion index
-function computeDropIndexInColumn(event) {
+/**
+ * Calculate drop index when hovering in column empty space
+ */
+function computeDropIndexInEmptySpace(event) {
   const container = tasksContainerRef.value;
-  if (!container) return 0;
+  if (!container) return props.column.tasks.length;
 
-  const wrappers = Array.from(container.querySelectorAll(".task-wrapper[data-task-id]"));
-
-  // If no rendered tasks, it’s index 0
-  if (wrappers.length === 0) return 0;
+  // Find all task wrappers (not placeholders or ghosts)
+  const wrappers = Array.from(
+    container.querySelectorAll(".task-wrapper[data-task-id]")
+  );
+  
+  if (wrappers.length === 0) {
+    return 0;
+  }
 
   const mouseY = event.clientY;
-
-  // Find first wrapper whose midpoint is below mouse
+  const dragId = draggedTaskId.value;
+  const srcCol = dragDrop.sourceColumnId.value;
+  const srcIdx = dragDrop.sourceIndex.value;
+  
+  // Find insertion point
   let insertIndex = props.column.tasks.length;
 
   for (const el of wrappers) {
+    const taskId = el.getAttribute("data-task-id");
+    const originalIdx = originalIndexById.value[taskId];
+    
+    if (originalIdx === undefined) continue;
+    
     const rect = el.getBoundingClientRect();
-    const id = el.getAttribute("data-task-id");
-    const idx = taskIndexById.value[id];
-
-    if (typeof idx !== "number") continue;
-
     const mid = rect.top + rect.height / 2;
 
     if (mouseY < mid) {
-      insertIndex = idx;
+      // Same column: need to convert to filtered space
+      if (srcCol === props.column.id) {
+        if (originalIdx < srcIdx) {
+          insertIndex = originalIdx;
+        } else {
+          insertIndex = originalIdx - 1;
+        }
+      } else {
+        insertIndex = originalIdx;
+      }
       break;
     }
   }
 
-  // Normalize for same-column without-dragged space
-  if (
-    isSameColumn.value &&
-    typeof dragDrop.sourceIndex.value === "number" &&
-    insertIndex > dragDrop.sourceIndex.value
-  ) {
-    insertIndex = insertIndex - 1;
-  }
-
-  const baseLen = props.column.tasks.length;
-  const withoutDraggedLen =
-    isSameColumn.value && draggedTaskId.value
-      ? baseLen - 1
-      : baseLen;
-
-  return Math.max(0, Math.min(insertIndex, withoutDraggedLen));
+  // Clamp based on whether we're in same column
+  const maxIdx = srcCol === props.column.id 
+    ? props.column.tasks.length - 1 
+    : props.column.tasks.length;
+    
+  return Math.max(0, Math.min(insertIndex, maxIdx));
 }
 
 // =====================
@@ -289,50 +342,42 @@ const handleTaskDragStart = (event, task) => {
     return;
   }
 
-  // Capture height immediately for placeholder sizing
-  // (your composable should store this)
-  dragDrop.handleDragStart(event, task, props.column.id, taskIndexById.value[task.id], element);
+  const originalIndex = originalIndexById.value[task.id];
+  dragDrop.handleDragStart(event, task, props.column.id, originalIndex, element);
 };
 
 const handleTaskDragEnd = () => {
   dragDrop.handleDragEnd();
 };
 
-const handleTaskDragOver = (event, hoveredTaskId) => {
+const handleTaskDragOver = (event, hoveredTask) => {
   if (!draggedTaskId.value) return;
+  
+  // Don't process placeholder items
+  if (hoveredTask.isPlaceholder || hoveredTask.isGhost) return;
+  
   event.stopPropagation();
 
   const now = Date.now();
   if (now - lastDropUpdate.value < DRAG_UPDATE_THROTTLE) return;
-
-  const idx = computeDropIndexOverTask(event, hoveredTaskId);
-
-  // Prefer composable API if available
-  if (typeof dragDrop.handleDragOver === "function") {
-    dragDrop.handleDragOver(event, props.column.id, idx);
-  } else {
-    dragDrop.dropTargetColumnId.value = props.column.id;
-    dragDrop.dropTargetIndex.value = idx;
-  }
-
   lastDropUpdate.value = now;
+
+  const idx = computeDropIndex(event, hoveredTask);
+  dragDrop.handleDragOver(event, props.column.id, idx);
 };
 
 const handleColumnDragOver = (event) => {
   if (!draggedTaskId.value) return;
 
-  const idx = computeDropIndexInColumn(event);
-
-  dragDrop.dropTargetColumnId.value = props.column.id;
-  dragDrop.dropTargetIndex.value = idx;
+  const idx = computeDropIndexInEmptySpace(event);
+  dragDrop.handleDragOver(event, props.column.id, idx);
 };
 
 const handleEmptyColumnDragOver = (event) => {
   if (!draggedTaskId.value) return;
   event.preventDefault();
 
-  dragDrop.dropTargetColumnId.value = props.column.id;
-  dragDrop.dropTargetIndex.value = 0;
+  dragDrop.handleDragOver(event, props.column.id, 0);
 };
 
 const handleColumnDrop = (event) => {
@@ -346,7 +391,7 @@ let escapeHandler = null;
 
 onMounted(() => {
   escapeHandler = (e) => {
-    if (e.key === "Escape" && draggedTaskId.value && typeof dragDrop.resetDragState === "function") {
+    if (e.key === "Escape" && draggedTaskId.value) {
       dragDrop.resetDragState();
     }
   };
@@ -425,12 +470,11 @@ defineExpose({ scrollerRef });
   padding: 4px 6px;
 }
 
-/* Placeholder item wrapper: reserve space naturally via real height */
+/* Placeholder - visible drop indicator */
 .placeholder-wrapper {
   pointer-events: none;
 }
 
-/* Visual placeholder */
 .floating-placeholder {
   height: 100%;
   border: 2px dashed rgba(99, 102, 241, 0.8);
@@ -457,6 +501,12 @@ defineExpose({ scrollerRef });
   100% { transform: translateX(100%); }
 }
 
+/* Ghost - invisible spacer */
+.ghost-wrapper {
+  pointer-events: none;
+  opacity: 0;
+}
+
 /* Empty column */
 .empty-drop-zone {
   flex: 1;
@@ -468,7 +518,6 @@ defineExpose({ scrollerRef });
 
 .empty-placeholder {
   width: 100%;
-  height: 80px;
   border: 2px dashed rgba(99, 102, 241, 0.8);
   border-radius: 8px;
   background: rgba(99, 102, 241, 0.1);
