@@ -78,10 +78,13 @@ import KanbanTask from "./KanbanTask.vue";
 const MIN_ITEM_SIZE = 80;
 
 // Hysteresis to prevent index flip-flopping near a task midpoint
-const MIDPOINT_HYSTERESIS = 10;
+const MIDPOINT_HYSTERESIS = 20;
 
 // Throttle for drag updates (~60fps)
 const DRAG_UPDATE_THROTTLE = 16;
+
+// Track last computed index to prevent toggling
+const lastComputedIndex = ref(null);
 
 const props = defineProps({
   column: { type: Object, required: true },
@@ -202,9 +205,9 @@ function computeDropIndexOverTask(event, hoveredTask) {
   // Determine before/after unless in dead zone
   let insertAfter;
   if (inDeadZone) {
-    // Keep current index if we are already targeting this column; otherwise bias to "before"
-    if (dragDrop.dropTargetColumnId.value === props.column.id && dragDrop.dropTargetIndex.value != null) {
-      return dragDrop.dropTargetIndex.value;
+    // Stay with last computed index if we're in the dead zone
+    if (lastComputedIndex.value !== null && dragDrop.dropTargetColumnId.value === props.column.id) {
+      return lastComputedIndex.value;
     }
     insertAfter = false;
   } else {
@@ -214,20 +217,25 @@ function computeDropIndexOverTask(event, hoveredTask) {
   // === SAME COLUMN ===
   if (srcCol === props.column.id) {
     // We compute indices in "filtered space" (dragged item removed), because renderItems uses that.
+    let resultIndex;
     if (hoveredOriginalIndex < srcIdx) {
-      return insertAfter ? hoveredOriginalIndex + 1 : hoveredOriginalIndex;
+      resultIndex = insertAfter ? hoveredOriginalIndex + 1 : hoveredOriginalIndex;
     } else if (hoveredOriginalIndex > srcIdx) {
       const filteredIdx = hoveredOriginalIndex - 1;
-      return insertAfter ? filteredIdx + 1 : filteredIdx;
+      resultIndex = insertAfter ? filteredIdx + 1 : filteredIdx;
     } else {
       // hovering original dragged position; keep current
-      return dragDrop.dropTargetIndex.value ?? srcIdx;
+      resultIndex = dragDrop.dropTargetIndex.value ?? srcIdx;
     }
+    lastComputedIndex.value = resultIndex;
+    return resultIndex;
   }
 
   // === DIFFERENT COLUMN ===
   const targetIdx = insertAfter ? hoveredOriginalIndex + 1 : hoveredOriginalIndex;
-  return Math.max(0, Math.min(targetIdx, props.column.tasks.length));
+  const resultIndex = Math.max(0, Math.min(targetIdx, props.column.tasks.length));
+  lastComputedIndex.value = resultIndex;
+  return resultIndex;
 }
 
 function computeDropIndexInEmptySpace(event) {
@@ -291,6 +299,7 @@ const handleTaskDragStart = (event, task) => {
 
 const handleTaskDragEnd = () => {
   dragDrop.handleDragEnd();
+  lastComputedIndex.value = null;
 };
 
 const handleTaskDragOver = (event, hoveredTask) => {
@@ -398,6 +407,37 @@ defineExpose({ scrollerRef });
   height: 100%;
   overflow-y: auto !important;
   overflow-x: hidden;
+}
+
+/* Professional scrollbar styling */
+.tasks-scroller::-webkit-scrollbar {
+  width: 8px;
+}
+
+.tasks-scroller::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 4px;
+  margin: 4px 0;
+}
+
+.tasks-scroller::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  transition: background 0.2s ease;
+}
+
+.tasks-scroller::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.tasks-scroller::-webkit-scrollbar-thumb:active {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Firefox scrollbar styling */
+.tasks-scroller {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) rgba(255, 255, 255, 0.02);
 }
 
 /* Smooth reflow when placeholder index changes */
