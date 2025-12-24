@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, onBeforeUnmount } from 'vue'
 
 export function useKanbanDragDrop() {
   // ============ STATE ============
@@ -23,6 +23,10 @@ export function useKanbanDragDrop() {
 
   let dragMoveListener = null
   let dragSourceElement = null
+  let cleanupTimeoutId = null
+
+  // Store the onMove callback to execute AFTER animation
+  let pendingMoveCallback = null
 
   const applyPreviewTransform = () => {
     const el = customDragElement.value
@@ -42,23 +46,48 @@ export function useKanbanDragDrop() {
     })
   }
 
-  const cleanupPreviewAndListeners = () => {
+  const cleanup = () => {
+    // Remove drag listeners
     if (dragSourceElement && dragMoveListener) {
       dragSourceElement.removeEventListener('drag', dragMoveListener)
+      dragSourceElement = null
+      dragMoveListener = null
     }
-    dragMoveListener = null
-    dragSourceElement = null
 
+    // Clear timeouts
+    if (cleanupTimeoutId) {
+      clearTimeout(cleanupTimeoutId)
+      cleanupTimeoutId = null
+    }
+
+    // Remove custom drag element
     if (customDragElement.value) {
-      customDragElement.value.remove()
+      try {
+        customDragElement.value.remove()
+      } catch (e) {
+        // Already removed
+      }
       customDragElement.value = null
     }
 
     rafPending = false
+    mouseX = 0
+    mouseY = 0
+    pendingMoveCallback = null
   }
 
   // ============ DRAG START ============
   const handleDragStart = (event, task, columnId, index, element) => {
+    // If element not provided, try to find it
+    if (!element) {
+      element = event.target?.closest?.('[draggable="true"]')
+    }
+    
+    if (!element) {
+      event.preventDefault()
+      return
+    }
+
     draggedTask.value = { ...task }
     sourceColumnId.value = columnId
     sourceIndex.value = index
@@ -66,10 +95,8 @@ export function useKanbanDragDrop() {
     dropTargetColumnId.value = columnId
     dropTargetIndex.value = index
 
-    if (element) {
-      const rect = element.getBoundingClientRect()
-      placeholderHeight.value = rect.height
-    }
+    const rect = element.getBoundingClientRect()
+    placeholderHeight.value = rect.height
 
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData('text/plain', task.id)
@@ -77,61 +104,55 @@ export function useKanbanDragDrop() {
     mouseX = event.clientX
     mouseY = event.clientY
 
-    if (element) {
-      const rect = element.getBoundingClientRect()
-
-      dragOffset.value = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top
-      }
-
-      const clone = element.cloneNode(true)
-      clone.style.position = 'fixed'
-      clone.style.left = '0px'
-      clone.style.top = '0px'
-      clone.style.width = `${rect.width}px`
-      clone.style.opacity = '1'
-      clone.style.borderRadius = '7px'
-      clone.style.pointerEvents = 'none'
-      clone.style.zIndex = '10000'
-      clone.style.background = '#22232F'
-      clone.style.border = '1px solid rgba(255, 255, 255, 0.15)'
-      clone.style.boxShadow = '0 8px 24px rgba(0, 0, 0, 0.6)'
-      clone.style.transition = 'none'
-      clone.style.willChange = 'transform'
-      clone.style.contain = 'paint'
-
-      customDragElement.value = clone
-      document.body.appendChild(clone)
-
-      applyPreviewTransform()
-
-      // Hide default drag image
-      const img = new Image()
-      img.src =
-        'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
-      event.dataTransfer.setDragImage(img, 0, 0)
-
-      // Track movement via dragged element's "drag"
-      dragSourceElement = element
-      dragMoveListener = (e) => {
-        if (e.clientX !== 0 && e.clientY !== 0) {
-          mouseX = e.clientX
-          mouseY = e.clientY
-          schedulePreviewMove()
-        }
-      }
-      dragSourceElement.addEventListener('drag', dragMoveListener)
-
-      const cleanupDragElement = () => {
-        cleanupPreviewAndListeners()
-        document.removeEventListener('dragend', cleanupDragElement)
-        document.removeEventListener('drop', cleanupDragElement)
-      }
-
-      document.addEventListener('dragend', cleanupDragElement, { once: true })
-      document.addEventListener('drop', cleanupDragElement, { once: true })
+    dragOffset.value = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top
     }
+
+    const clone = element.cloneNode(true)
+    clone.style.position = 'fixed'
+    clone.style.left = '0px'
+    clone.style.top = '0px'
+    clone.style.width = `${rect.width}px`
+    clone.style.opacity = '1'
+    clone.style.borderRadius = '7px'
+    clone.style.pointerEvents = 'none'
+    clone.style.zIndex = '10000'
+    clone.style.background = '#22232F'
+    clone.style.border = '1px solid rgba(255, 255, 255, 0.15)'
+    clone.style.boxShadow = '0 8px 24px rgba(0, 0, 0, 0.6)'
+    clone.style.transition = 'none'
+    clone.style.willChange = 'transform'
+
+    customDragElement.value = clone
+    document.body.appendChild(clone)
+
+    applyPreviewTransform()
+
+    // Hide default drag image
+    const img = new Image()
+    img.src =
+      'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+    event.dataTransfer.setDragImage(img, 0, 0)
+
+    // Track movement
+    dragSourceElement = element
+    dragMoveListener = (e) => {
+      if (e.clientX !== 0 && e.clientY !== 0) {
+        mouseX = e.clientX
+        mouseY = e.clientY
+        schedulePreviewMove()
+      }
+    }
+    dragSourceElement.addEventListener('drag', dragMoveListener)
+
+    // Fallback cleanup timeout
+    cleanupTimeoutId = setTimeout(() => {
+      if (customDragElement.value) {
+        console.warn('Drag cleanup via timeout')
+        resetDragState()
+      }
+    }, 15000)
 
     requestAnimationFrame(() => {
       isDragging.value = true
@@ -146,7 +167,7 @@ export function useKanbanDragDrop() {
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
 
-    // Secondary movement tracking (helps some browsers)
+    // Track movement
     if (event.clientX !== 0 && event.clientY !== 0) {
       mouseX = event.clientX
       mouseY = event.clientY
@@ -160,7 +181,7 @@ export function useKanbanDragDrop() {
   }
 
   // ============ DROP ============
-  const handleDrop = (event, columnId, onMove) => {
+  const handleColumnDrop = (event, columnId, onMove) => {
     if (!isDragging.value || !draggedTask.value) return
     event.preventDefault()
 
@@ -169,25 +190,84 @@ export function useKanbanDragDrop() {
     const srcCol = sourceColumnId.value
     const srcIdx = sourceIndex.value
 
-    if (onMove) {
-      onMove({
-        task: draggedTask.value,
-        sourceColumnId: srcCol,
-        sourceColumnIndex: srcIdx,
-        targetColumnId: targetCol,
-        targetIndex: targetIdx
-      })
+    // Store the move data for AFTER animation
+    pendingMoveCallback = () => {
+      if (onMove) {
+        onMove({
+          task: draggedTask.value,
+          sourceColumnId: srcCol,
+          sourceColumnIndex: srcIdx,
+          targetColumnId: targetCol,
+          targetIndex: targetIdx
+        })
+      }
     }
 
-    resetDragState()
+    // Find placeholder
+    const placeholderEl = document.querySelector('.placeholder-inner')
+    
+    if (placeholderEl && customDragElement.value) {
+      const dragEl = customDragElement.value
+      const targetRect = placeholderEl.getBoundingClientRect()
+      
+      // Stop tracking mouse immediately
+      if (dragSourceElement && dragMoveListener) {
+        dragSourceElement.removeEventListener('drag', dragMoveListener)
+        dragMoveListener = null
+      }
+      
+      // Start animation
+      dragEl.style.transition = 'transform 250ms cubic-bezier(0.2, 0, 0, 1)'
+      
+      // Use RAF to ensure smooth animation start
+      requestAnimationFrame(() => {
+        dragEl.style.transform = `translate3d(${targetRect.left}px, ${targetRect.top}px, 0)`
+      })
+      
+      // After animation completes
+      setTimeout(() => {
+        // Fade out the drag preview
+        dragEl.style.opacity = '0'
+        dragEl.style.transition = 'opacity 100ms ease'
+        
+        // Execute the move NOW (updates data)
+        if (pendingMoveCallback) {
+          pendingMoveCallback()
+          pendingMoveCallback = null
+        }
+        
+        // Final cleanup after fade
+        setTimeout(() => {
+          cleanup()
+          
+          // Clear drag state
+          isDragging.value = false
+          draggedTask.value = null
+          sourceColumnId.value = null
+          sourceIndex.value = null
+          dropTargetColumnId.value = null
+          dropTargetIndex.value = null
+          document.body.classList.remove('is-dragging')
+        }, 100)
+      }, 250)
+    } else {
+      // No placeholder found - immediate update
+      if (pendingMoveCallback) {
+        pendingMoveCallback()
+        pendingMoveCallback = null
+      }
+      resetDragState()
+    }
   }
 
   const handleDragEnd = () => {
+    // Cancel any pending move
+    pendingMoveCallback = null
     resetDragState()
   }
 
   const resetDragState = () => {
-    cleanupPreviewAndListeners()
+    cleanup()
 
     isDragging.value = false
     draggedTask.value = null
@@ -199,17 +279,10 @@ export function useKanbanDragDrop() {
     document.body.classList.remove('is-dragging')
   }
 
-  // The following are kept for compatibility, even if you no longer rely on them.
-  const getTaskTransform = () => null
-
-  const isDraggedTask = (taskId) => {
-    return isDragging.value && draggedTask.value?.id === taskId
-  }
-
-  const shouldShowPlaceholder = (columnId, index) => {
-    if (!isDragging.value) return false
-    return dropTargetColumnId.value === columnId && dropTargetIndex.value === index
-  }
+  // Cleanup on unmount
+  onBeforeUnmount(() => {
+    resetDragState()
+  })
 
   return {
     isDragging,
@@ -222,12 +295,9 @@ export function useKanbanDragDrop() {
 
     handleDragStart,
     handleDragOver,
-    handleDrop,
+    handleColumnDrop,
     handleDragEnd,
     resetDragState,
-
-    getTaskTransform,
-    isDraggedTask,
-    shouldShowPlaceholder
+    cleanup: resetDragState
   }
 }

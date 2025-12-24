@@ -326,7 +326,7 @@ const handleColumnDragOver = (event) => {
 };
 
 const handleColumnDrop = (event) => {
-  dragDrop.handleDrop(event, props.column.id, (moveData) => {
+  dragDrop.handleColumnDrop(event, props.column.id, (moveData) => {
     emit("task-move", moveData);
   });
 };
@@ -450,7 +450,7 @@ defineExpose({ scrollerRef });
   will-change: transform;
 }
 
-/* Hide the original dragged card without animating opacity (prevents “blink”) */
+/* Hide the original dragged card without animating opacity (prevents "blink") */
 .task-wrapper.dragged-original {
   opacity: 0;
 }
