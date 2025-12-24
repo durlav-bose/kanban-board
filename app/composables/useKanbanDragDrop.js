@@ -16,6 +16,9 @@ export function useKanbanDragDrop() {
   const dropTargetColumnId = ref(null)
   const dropTargetIndex = ref(null)
 
+  // Animation state
+  const isDropAnimating = ref(false)
+
   // ============ NON-REACTIVE COORDS ============
   let mouseX = 0
   let mouseY = 0
@@ -25,19 +28,20 @@ export function useKanbanDragDrop() {
   let dragSourceElement = null
   let cleanupTimeoutId = null
 
-  // Store the onMove callback to execute AFTER animation
+  // Store the onMove callback and target position
   let pendingMoveCallback = null
+  let capturedTargetRect = null
 
   const applyPreviewTransform = () => {
     const el = customDragElement.value
-    if (!el) return
+    if (!el || isDropAnimating.value) return
     const x = mouseX - dragOffset.value.x
     const y = mouseY - dragOffset.value.y
     el.style.transform = `translate3d(${x}px, ${y}px, 0)`
   }
 
   const schedulePreviewMove = () => {
-    if (rafPending) return
+    if (rafPending || isDropAnimating.value) return
     rafPending = true
 
     requestAnimationFrame(() => {
@@ -74,6 +78,7 @@ export function useKanbanDragDrop() {
     mouseX = 0
     mouseY = 0
     pendingMoveCallback = null
+    capturedTargetRect = null
   }
 
   // ============ DRAG START ============
@@ -148,7 +153,7 @@ export function useKanbanDragDrop() {
 
     // Fallback cleanup timeout
     cleanupTimeoutId = setTimeout(() => {
-      if (customDragElement.value) {
+      if (customDragElement.value && !isDropAnimating.value) {
         console.warn('Drag cleanup via timeout')
         resetDragState()
       }
@@ -162,7 +167,7 @@ export function useKanbanDragDrop() {
 
   // ============ DRAG OVER ============
   const handleDragOver = (event, columnId, taskIndex) => {
-    if (!isDragging.value) return
+    if (!isDragging.value || isDropAnimating.value) return
 
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
@@ -182,13 +187,16 @@ export function useKanbanDragDrop() {
 
   // ============ DROP ============
   const handleColumnDrop = (event, columnId, onMove) => {
-    if (!isDragging.value || !draggedTask.value) return
+    if (!isDragging.value || !draggedTask.value || isDropAnimating.value) return
     event.preventDefault()
 
     const targetCol = dropTargetColumnId.value || columnId
     const targetIdx = dropTargetIndex.value ?? 0
     const srcCol = sourceColumnId.value
     const srcIdx = sourceIndex.value
+
+    // Mark as animating to prevent further updates
+    isDropAnimating.value = true
 
     // Store the move data for AFTER animation
     pendingMoveCallback = () => {
@@ -203,12 +211,14 @@ export function useKanbanDragDrop() {
       }
     }
 
-    // Find placeholder
+    // CRITICAL: Capture placeholder position BEFORE any state changes
     const placeholderEl = document.querySelector('.placeholder-inner')
     
     if (placeholderEl && customDragElement.value) {
       const dragEl = customDragElement.value
-      const targetRect = placeholderEl.getBoundingClientRect()
+      
+      // Capture target position immediately
+      capturedTargetRect = placeholderEl.getBoundingClientRect()
       
       // Stop tracking mouse immediately
       if (dragSourceElement && dragMoveListener) {
@@ -216,54 +226,64 @@ export function useKanbanDragDrop() {
         dragMoveListener = null
       }
       
-      // Start animation
-      dragEl.style.transition = 'transform 250ms cubic-bezier(0.2, 0, 0, 1)'
+      // Stop RAF updates
+      rafPending = false
       
-      // Use RAF to ensure smooth animation start
+      // Prepare for animation - use captured position
+      dragEl.style.transition = 'transform 220ms cubic-bezier(0.2, 0, 0, 1)'
+      
+      // Start animation to captured position
       requestAnimationFrame(() => {
-        dragEl.style.transform = `translate3d(${targetRect.left}px, ${targetRect.top}px, 0)`
+        if (capturedTargetRect) {
+          dragEl.style.transform = `translate3d(${capturedTargetRect.left}px, ${capturedTargetRect.top}px, 0)`
+        }
       })
       
-      // After animation completes
+      // After animation reaches target
       setTimeout(() => {
-        // Fade out the drag preview
+        // Start fade out
         dragEl.style.opacity = '0'
-        dragEl.style.transition = 'opacity 100ms ease'
+        dragEl.style.transition = 'opacity 80ms ease'
         
-        // Execute the move NOW (updates data)
+        // Execute the move (updates DOM)
         if (pendingMoveCallback) {
           pendingMoveCallback()
           pendingMoveCallback = null
         }
         
-        // Final cleanup after fade
+        // After fade completes, full cleanup
         setTimeout(() => {
           cleanup()
           
-          // Clear drag state
+          // Clear all drag state
           isDragging.value = false
           draggedTask.value = null
           sourceColumnId.value = null
           sourceIndex.value = null
           dropTargetColumnId.value = null
           dropTargetIndex.value = null
+          isDropAnimating.value = false
           document.body.classList.remove('is-dragging')
-        }, 100)
-      }, 250)
+        }, 80)
+      }, 220)
     } else {
       // No placeholder found - immediate update
       if (pendingMoveCallback) {
         pendingMoveCallback()
         pendingMoveCallback = null
       }
+      isDropAnimating.value = false
       resetDragState()
     }
   }
 
   const handleDragEnd = () => {
-    // Cancel any pending move
-    pendingMoveCallback = null
-    resetDragState()
+    // Only reset if not animating a drop
+    if (!isDropAnimating.value) {
+      // Cancel any pending move
+      pendingMoveCallback = null
+      resetDragState()
+    }
   }
 
   const resetDragState = () => {
@@ -275,6 +295,7 @@ export function useKanbanDragDrop() {
     sourceIndex.value = null
     dropTargetColumnId.value = null
     dropTargetIndex.value = null
+    isDropAnimating.value = false
 
     document.body.classList.remove('is-dragging')
   }
@@ -292,6 +313,7 @@ export function useKanbanDragDrop() {
     dropTargetColumnId,
     dropTargetIndex,
     placeholderHeight,
+    isDropAnimating,
 
     handleDragStart,
     handleDragOver,

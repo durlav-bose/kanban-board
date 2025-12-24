@@ -15,7 +15,10 @@
       <DynamicScroller
         ref="scrollerRef"
         class="tasks-scroller"
-        :class="{ 'is-reordering': isDropTarget && isDragging }"
+        :class="{ 
+          'is-reordering': isDropTarget && isDragging && !isDropAnimating,
+          'drop-animating': isDropAnimating
+        }"
         :items="renderItems"
         :min-item-size="MIN_ITEM_SIZE"
         key-field="id"
@@ -113,6 +116,8 @@ const draggedTaskId = computed(() => dragDrop?.draggedTask?.value?.id || null);
 const placeholderHeight = computed(() => {
   return dragDrop?.placeholderHeight?.value || MIN_ITEM_SIZE;
 });
+
+const isDropAnimating = computed(() => !!dragDrop?.isDropAnimating?.value);
 
 // Map task ID -> original index in column.tasks
 const originalIndexById = computed(() => {
@@ -440,9 +445,14 @@ defineExpose({ scrollerRef });
   scrollbar-color: rgba(255, 255, 255, 0.12) rgba(255, 255, 255, 0.02);
 }
 
-/* Smooth reflow when placeholder index changes */
+/* Smooth reflow when placeholder index changes - but NOT during drop animation */
 .tasks-scroller.is-reordering :deep(.vue-recycle-scroller__item-view) {
   transition: transform 140ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Disable transitions during drop to prevent blink */
+.tasks-scroller.drop-animating :deep(.vue-recycle-scroller__item-view) {
+  transition: none !important;
 }
 
 .task-wrapper {
